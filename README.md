@@ -119,23 +119,52 @@ until the end:
 ```
 run a1b2c3d4e5f6: 4 units, planning...
 planned 4 units via claude-opus-4-8 ($0.0141) -- starting workers
-[inv-002] checker passed -- PASSED (1 attempt(s))
-[inv-001] attempt 1: checker rejected -- line items sum to 545.5 but total_amount is 999.99
-[inv-004] checker passed -- PASSED (1 attempt(s))
-[inv-001] checker passed -- PASSED (2 attempt(s))
-[inv-003] checker passed -- PASSED (1 attempt(s))
-run a1b2c3d4e5f6 complete: 4/4 passed, $0.0234 total
+[inv-002] checker passed -- PASSED (1 attempt(s), claude-sonnet-5)
+[inv-001] attempt 1 (claude-sonnet-5): checker rejected -- line items sum to 545.5 but total_amount is 999.99
+[inv-004] checker passed -- PASSED (1 attempt(s), z-ai/glm-5.2)
+[inv-001] checker passed -- PASSED (2 attempt(s), claude-sonnet-5)
+[inv-003] checker passed -- PASSED (1 attempt(s), claude-sonnet-5)
+run a1b2c3d4e5f6 complete: 4/4 passed, $0.0234 total, OpenRouter: z-ai/glm-5.2
 ```
 
 Units run concurrently, so lines from different units interleave — each
-is prefixed with its `unit_id` so it stays legible. Pass `--quiet` to
-suppress this and only see the final scorecard report (useful when
-piping output somewhere that doesn't want a stream of progress lines).
-Re-print a past run's report with:
+is prefixed with its `unit_id` so it stays legible. Every per-unit line
+names the model that actually served it, and the final line states
+plainly whether OpenRouter was used this run and which model(s) — not
+just whether it was *available* (`allow_openrouter=True` + a key present
+only means the planner *could* route there; the planner still decides
+per unit whether to). Pass `--quiet` to suppress the live stream and only
+see the final scorecard report (useful when piping output somewhere that
+doesn't want a stream of progress lines). Re-print a past run's report
+with:
 
 ```bash
 python -m ringer.cli report extract_invoices_scorecard.sqlite3 <run_id>
 ```
+
+```
+=== ringer scorecard :: run a1b2c3d4e5f6 ===
+units:      4
+pass rate:  4/4 (100%)
+  passed                 4
+
+total cost: $0.0234
+  checker    $0.0000
+  planner    $0.0141
+  worker     $0.0093
+
+models:
+  planner    claude-opus-4-8              1 call  $0.0141
+  worker     claude-sonnet-5              4 calls $0.0081
+  worker     z-ai/glm-5.2                 1 call  $0.0012
+
+openrouter: yes -- z-ai/glm-5.2
+```
+
+The `models` breakdown and `openrouter` line are also queryable directly
+from the scorecard's own methods (`Scorecard.model_summary(run_id)`,
+`.openrouter_models_used(run_id)`) if you're driving `ringer` as a library
+rather than through the CLI.
 
 ## Prompt-driven flow — no Python required
 
