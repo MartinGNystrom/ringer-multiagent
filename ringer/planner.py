@@ -23,34 +23,53 @@ never do the work yourself. For each unit in the manifest, decide:
 - whether this unit's correctness is subjective enough that a fresh-eyes \
   reviewer must check it before it's trusted (needs_judge), and if so, a \
   short rubric for that reviewer
-- whether the unit is routine enough for a cheaper "thrift" worker tier, \
-  or needs the "default" tier
+- which worker tier the unit needs (see the tier guidance below)
 
 Write one spec per unit_id in the manifest. Do not invent unit_ids. Do not \
 attempt the task yourself -- only produce specs."""
 
-_PLAN_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "specs": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "unit_id": {"type": "string"},
-                    "instructions": {"type": "string"},
-                    "tier": {"type": "string", "enum": ["default", "thrift"]},
-                    "needs_judge": {"type": "boolean"},
-                    "judge_rubric": {"type": ["string", "null"]},
+_TIER_GUIDANCE_CLOSED = """\
+- "default": the everyday tier for this unit
+- "thrift": routine, low-complexity units (simple lookups, short classification) \
+  where a cheaper model is enough"""
+
+_TIER_GUIDANCE_OPEN = """\
+- "default": the everyday tier for this unit
+- "thrift": routine, low-complexity Anthropic-tier work
+- "openrouter_glm" / "openrouter_kimi": open-weight models routed through \
+  OpenRouter, cheaper still than "thrift" -- use these for the highest-volume, \
+  lowest-stakes units where cost matters most and the mechanical checker can \
+  catch a bad output on its own. Their structured-output reliability is lower \
+  than an Anthropic model's, so avoid them for units the checker can't fully \
+  verify (i.e. anything you'd also mark needs_judge)."""
+
+
+def _plan_schema(allow_openrouter: bool) -> dict:
+    tiers = ["default", "thrift"]
+    if allow_openrouter:
+        tiers += ["openrouter_glm", "openrouter_kimi"]
+    return {
+        "type": "object",
+        "properties": {
+            "specs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "unit_id": {"type": "string"},
+                        "instructions": {"type": "string"},
+                        "tier": {"type": "string", "enum": tiers},
+                        "needs_judge": {"type": "boolean"},
+                        "judge_rubric": {"type": ["string", "null"]},
+                    },
+                    "required": ["unit_id", "instructions", "tier", "needs_judge", "judge_rubric"],
+                    "additionalProperties": False,
                 },
-                "required": ["unit_id", "instructions", "tier", "needs_judge", "judge_rubric"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["specs"],
-    "additionalProperties": False,
-}
+            }
+        },
+        "required": ["specs"],
+        "additionalProperties": False,
+    }
 
 
 @dataclass
@@ -68,6 +87,7 @@ async def plan(
     output_schema: dict,
     units: list[dict],
     tier: Tier = Tier.DEFAULT,
+    allow_openrouter: bool = False,
     max_tokens: int = 8000,
     effort: str = "high",
 ) -> PlanResult:
@@ -76,8 +96,16 @@ async def plan(
     `units` is a list of {"unit_id": str, "preview": str} -- previews only,
     never full content (see module docstring). The caller attaches the real
     `input_data` afterward by unit_id; see orchestrator.py.
+
+    `allow_openrouter` opts the planner into routing units to the
+    OpenRouter worker tiers (models.py Tier.OPENROUTER_GLM/_KIMI). It's off
+    by default -- a task author has to explicitly decide their units can
+    tolerate a less reliable, third-party structured-output path before the
+    planner is even allowed to reach for it.
     """
     model = resolve_model(Role.PLANNER, tier)
+    tier_guidance = _TIER_GUIDANCE_OPEN if allow_openrouter else _TIER_GUIDANCE_CLOSED
+    system = f"{_PLANNER_SYSTEM}\n\nTIER OPTIONS\n{tier_guidance}"
 
     manifest = "\n".join(f"- {u['unit_id']}: {u.get('preview', '')[:400]}" for u in units)
     user_content = (
@@ -88,9 +116,9 @@ async def plan(
 
     result = await call_json(
         model=model,
-        system=_PLANNER_SYSTEM,
+        system=system,
         user_content=user_content,
-        schema=_PLAN_SCHEMA,
+        schema=_plan_schema(allow_openrouter),
         max_tokens=max_tokens,
         effort=effort,
     )

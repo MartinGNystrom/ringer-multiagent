@@ -90,7 +90,13 @@ def build_checker():
     )
 
 
-def build_task() -> OrchestratorConfig:
+def build_task(allow_openrouter: bool = False) -> OrchestratorConfig:
+    """allow_openrouter=True lets the planner route some invoices to the
+    OpenRouter open-weight worker tiers (GLM 5.2 / Kimi K2) instead of
+    Sonnet/Haiku -- requires OPENROUTER_API_KEY. The same checker gates the
+    output either way, so this is a real head-to-head of the two worker
+    backends on identical units, not a separate code path.
+    """
     unit_previews = [
         {"unit_id": unit_id, "preview": text.strip().splitlines()[0]}
         for unit_id, text in INVOICES.items()
@@ -104,7 +110,13 @@ def build_task() -> OrchestratorConfig:
         checker=build_checker(),
         planner_tier=Tier.DEFAULT,
         judge_tier=Tier.DEFAULT,
+        allow_openrouter=allow_openrouter,
         max_retries=2,
         max_concurrency=4,
         scorecard_path="extract_invoices_scorecard.sqlite3",
     )
+
+
+def build_task_openrouter() -> OrchestratorConfig:
+    """Zero-arg variant for the CLI: `ringer run examples.extract_invoices.task:build_task_openrouter`"""
+    return build_task(allow_openrouter=True)

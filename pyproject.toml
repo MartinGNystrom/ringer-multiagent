@@ -1,11 +1,12 @@
 [project]
 name = "ringer"
 version = "0.1.0"
-description = "Router-judge multi-agent harness on Claude Fable/Opus (planner+judge) and Sonnet/Haiku (workers)"
+description = "Router-judge multi-agent harness: Claude Fable/Opus plan and judge; Sonnet/Haiku and OpenRouter open-weight models (GLM, Kimi) work"
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.68.0",
     "jsonschema>=4.21",
+    "httpx>=0.24",
 ]
 
 [project.optional-dependencies]

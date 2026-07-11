@@ -52,6 +52,9 @@ class OrchestratorConfig:
     checker: Checker
     planner_tier: Tier = Tier.DEFAULT
     judge_tier: Tier = Tier.DEFAULT
+    # Let the planner route units to OpenRouter open-weight workers (GLM 5.2,
+    # Kimi K2) as a cost tier. Off by default -- see planner.py docstring.
+    allow_openrouter: bool = False
     max_retries: int = 3
     max_concurrency: int = 8
     worker_effort: str = "medium"
@@ -71,7 +74,30 @@ async def _run_unit(
 
     async with semaphore:
         for attempt_number in range(1, max_retries + 2):  # first try + max_retries retries
-            work = await worker_mod.run(spec)
+            try:
+                work = await worker_mod.run(spec)
+            except Exception as exc:  # noqa: BLE001 -- a worker call can cross into a
+                # third-party provider (OpenRouter) with its own failure modes
+                # (auth, rate limit, transport error) on top of Anthropic's own
+                # (refusal). Any of these is a rejected attempt, not a crashed
+                # run -- record it and let the retry loop try again or, once
+                # retries are exhausted, surface the unit for a human.
+                attempt = Attempt(
+                    unit_id=spec.unit_id,
+                    attempt_number=attempt_number,
+                    model="",
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost=0.0,
+                    output=None,
+                    checker_passed=False,
+                    checker_reason=f"worker call raised {type(exc).__name__}: {exc}",
+                )
+                attempts.append(attempt)
+                scorecard.record_worker_attempt(run_id, attempt)
+                spec.failure_context.append(f"worker error: {exc}")
+                continue
+
             attempt = Attempt(
                 unit_id=spec.unit_id,
                 attempt_number=attempt_number,
@@ -134,6 +160,7 @@ async def run(config: OrchestratorConfig) -> RunReport:
         output_schema=config.output_schema,
         units=config.unit_previews,
         tier=config.planner_tier,
+        allow_openrouter=config.allow_openrouter,
     )
 
     for spec in plan_result.specs:

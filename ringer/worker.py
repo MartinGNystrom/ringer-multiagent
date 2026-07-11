@@ -3,6 +3,11 @@
 A worker executes exactly one TaskSpec and returns output matching the
 spec's schema. Its own confidence is never read by anything downstream --
 the checker and judge decide, not the worker's tone.
+
+Workers can be resolved to either an Anthropic model or an OpenRouter
+open-weight model (GLM 5.2, Kimi K2) -- see models.py Tier.OPENROUTER_*.
+Both paths return the same WorkResult shape so the orchestrator and
+checker never need to know which provider actually ran.
 """
 
 from __future__ import annotations
@@ -10,8 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ._client import call_json
-from .models import Role, Tier, resolve_model
+from . import _openrouter_client
+from ._client import call_json as _anthropic_call_json
+from .models import Provider, Role, Tier, provider_of, resolve_model
 from .spec import TaskSpec
 
 _WORKER_SYSTEM = """\
@@ -23,6 +29,8 @@ never invent one. If a previous attempt at this unit was rejected, the \
 rejection reason is included below -- fix that specific problem; do not \
 just retry the same output."""
 
+_TIER_BY_SPEC_VALUE = {t.value: t for t in Tier}
+
 
 @dataclass
 class WorkResult:
@@ -33,8 +41,21 @@ class WorkResult:
     model: str
 
 
+def _resolve_worker_tier(spec_tier: str) -> Tier:
+    try:
+        tier = _TIER_BY_SPEC_VALUE[spec_tier]
+    except KeyError:
+        tier = Tier.DEFAULT
+    # A worker only ever gets DEFAULT/THRIFT/OPENROUTER_* -- ESCALATED belongs
+    # to the planner and judge. Fail safe to DEFAULT rather than error out on
+    # a planner that mistakenly emitted "escalated" for a unit.
+    if tier not in (Tier.DEFAULT, Tier.THRIFT, Tier.OPENROUTER_GLM, Tier.OPENROUTER_KIMI):
+        tier = Tier.DEFAULT
+    return tier
+
+
 async def run(spec: TaskSpec, *, max_tokens: int = 8000, effort: str = "medium") -> WorkResult:
-    tier = Tier.THRIFT if spec.tier == "thrift" else Tier.DEFAULT
+    tier = _resolve_worker_tier(spec.tier)
     model = resolve_model(Role.WORKER, tier)
 
     if spec.output_schema is None:
@@ -46,14 +67,23 @@ async def run(spec: TaskSpec, *, max_tokens: int = 8000, effort: str = "medium")
         parts.append(f"PRIOR REJECTIONS -- FIX THESE\n{history}")
     user_content = "\n\n".join(parts)
 
-    result = await call_json(
-        model=model,
-        system=_WORKER_SYSTEM,
-        user_content=user_content,
-        schema=spec.output_schema,
-        max_tokens=max_tokens,
-        effort=effort,
-    )
+    if provider_of(model) is Provider.OPENROUTER:
+        result = await _openrouter_client.call_json(
+            model=model,
+            system=_WORKER_SYSTEM,
+            user_content=user_content,
+            schema=spec.output_schema,
+            max_tokens=max_tokens,
+        )
+    else:
+        result = await _anthropic_call_json(
+            model=model,
+            system=_WORKER_SYSTEM,
+            user_content=user_content,
+            schema=spec.output_schema,
+            max_tokens=max_tokens,
+            effort=effort,
+        )
 
     return WorkResult(
         output=result.parsed,
