@@ -211,6 +211,17 @@ def _cmd_intake(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # The installed `ringer` console script doesn't put the invoker's cwd on
+    # sys.path the way `python -m ringer.cli` does automatically -- without
+    # this, a task module in the current project (examples.extract_invoices
+    # .task, or one you wrote yourself) can't be found via `ringer run
+    # <module>:<callable>` even though it works fine with `python -m`.
+    # Matches the convention other CLI tools that dynamically import
+    # user-project code already use (pytest, alembic, etc).
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
     parser = argparse.ArgumentParser(prog="ringer")
     sub = parser.add_subparsers(dest="command", required=True)
 
