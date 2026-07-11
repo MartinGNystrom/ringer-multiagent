@@ -1,0 +1,32 @@
+"""Ringer: a router-judge multi-agent harness.
+
+Fable/Opus plan and judge; Sonnet/Haiku do the work; a mechanical checker
+gates everything before it's trusted. See docs/design.html for the design
+rationale behind each module.
+"""
+
+from .agent_test import AgentTestInputs, AgentTestResult, score
+from .checker import Checker, CheckResult, compose, schema_checker, source_attachment_checker
+from .models import Role, Tier, resolve_model
+from .orchestrator import OrchestratorConfig, RunReport, run
+from .spec import TaskSpec, UnitResult, UnitStatus
+
+__all__ = [
+    "AgentTestInputs",
+    "AgentTestResult",
+    "score",
+    "Role",
+    "Tier",
+    "resolve_model",
+    "Checker",
+    "CheckResult",
+    "compose",
+    "schema_checker",
+    "source_attachment_checker",
+    "OrchestratorConfig",
+    "RunReport",
+    "run",
+    "TaskSpec",
+    "UnitResult",
+    "UnitStatus",
+]

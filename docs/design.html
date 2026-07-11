@@ -1,0 +1,725 @@
+<title>Router–Judge Multi-Agent Architecture</title>
+<style>
+  :root {
+    --paper: #eeefe9;
+    --paper-raised: #f7f7f2;
+    --ink: #1a1d1a;
+    --ink-soft: #4b5049;
+    --line: #d7d8cf;
+    --line-strong: #b9bbaf;
+    --accent: #b1602a;
+    --accent-soft: #b1602a1a;
+    --pass: #3e7a54;
+    --pass-soft: #3e7a5417;
+    --fail: #a13b2e;
+    --fail-soft: #a13b2e17;
+    --mono-bg: #e4e5dd;
+    --shadow: 0 1px 0 rgba(0,0,0,0.04);
+    --serif: Charter, "Iowan Old Style", "Georgia", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, Menlo, monospace;
+  }
+  :root[data-theme="dark"] {
+    --paper: #141613;
+    --paper-raised: #1c1f1b;
+    --ink: #eae8e0;
+    --ink-soft: #a7ab9f;
+    --line: #2c2f28;
+    --line-strong: #3c4036;
+    --accent: #e0904f;
+    --accent-soft: #e0904f22;
+    --pass: #6fbf8b;
+    --pass-soft: #6fbf8b1c;
+    --fail: #e0897a;
+    --fail-soft: #e0897a1c;
+    --mono-bg: #20231e;
+    --shadow: 0 1px 0 rgba(0,0,0,0.3);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #141613;
+      --paper-raised: #1c1f1b;
+      --ink: #eae8e0;
+      --ink-soft: #a7ab9f;
+      --line: #2c2f28;
+      --line-strong: #3c4036;
+      --accent: #e0904f;
+      --accent-soft: #e0904f22;
+      --pass: #6fbf8b;
+      --pass-soft: #6fbf8b1c;
+      --fail: #e0897a;
+      --fail-soft: #e0897a1c;
+      --mono-bg: #20231e;
+      --shadow: 0 1px 0 rgba(0,0,0,0.3);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; }
+
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(0, 240px) minmax(0, 760px);
+    justify-content: center;
+    gap: 56px;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 72px 28px 120px;
+  }
+  @media (max-width: 920px) {
+    .shell { grid-template-columns: minmax(0, 760px); padding: 40px 20px 80px; }
+    .rail { display: none; }
+  }
+
+  .rail { position: sticky; top: 48px; align-self: start; }
+  .rail-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 14px;
+  }
+  .rail ol { list-style: none; margin: 0; padding: 0; }
+  .rail li { margin-bottom: 3px; }
+  .rail a {
+    display: block;
+    padding: 5px 0 5px 14px;
+    border-left: 2px solid var(--line);
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 13.5px;
+    transition: border-color .15s, color .15s;
+  }
+  .rail a:hover { color: var(--ink); border-left-color: var(--line-strong); }
+  .rail .num { font-family: var(--mono); color: var(--accent); margin-right: 8px; font-size: 12px; }
+
+  header.masthead {
+    grid-column: 1 / -1;
+    max-width: 760px;
+    margin: 0 auto 8px;
+  }
+  @media (min-width: 921px) { header.masthead { grid-column: 2; margin: 0 0 8px; } }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .subtitle {
+    font-size: 1.1rem;
+    color: var(--ink-soft);
+    max-width: 58ch;
+    margin: 0 0 28px;
+  }
+  .byline {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  .byline b { color: var(--ink); font-weight: 600; }
+
+  main { min-width: 0; }
+
+  section { margin: 0 0 64px; scroll-margin-top: 24px; }
+  section > .kicker {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  section > .kicker .num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 7px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--serif);
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 30px 0 10px;
+  }
+  p { margin: 0 0 16px; max-width: 68ch; }
+  p.lede { font-size: 1.05rem; color: var(--ink-soft); }
+  strong { color: var(--ink); }
+  ul, ol.prose { margin: 0 0 16px; padding-left: 22px; max-width: 66ch; }
+  li { margin-bottom: 7px; }
+
+  code, .mono { font-family: var(--mono); font-size: 0.88em; }
+  code {
+    background: var(--mono-bg);
+    padding: 0.12em 0.4em;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--mono-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    margin: 20px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 8px 0 24px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .table-wrap { overflow-x: auto; margin: 0 0 24px; }
+  .table-wrap table { margin: 0; }
+
+  /* pipeline diagram */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    margin: 28px 0;
+    padding-bottom: 4px;
+  }
+  .stage {
+    background: var(--paper-raised);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 14px 16px;
+    min-width: 148px;
+    flex: 0 0 auto;
+    box-shadow: var(--shadow);
+  }
+  .stage .role {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .stage .name { font-weight: 700; font-size: 14.5px; margin-bottom: 4px; }
+  .stage .detail { font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    color: var(--line-strong);
+    font-size: 20px;
+  }
+  .fanout { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+  .fanout .stage { min-width: 128px; padding: 9px 12px; }
+  .fanout .stage .name { font-size: 12.5px; }
+
+  /* role cards */
+  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 20px 0 28px; }
+  .role-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    background: var(--paper-raised);
+  }
+  .role-card .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-bottom: 8px;
+  }
+  .role-card h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 700; }
+  .role-card p { font-size: 13px; color: var(--ink-soft); margin: 0; max-width: none; }
+
+  /* verdict pills */
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 12px; padding: 2px 9px; border-radius: 20px; font-weight: 600; }
+  .pill.yes { background: var(--pass-soft); color: var(--pass); }
+  .pill.no { background: var(--fail-soft); color: var(--fail); }
+
+  /* agent-test calculator */
+  .calc {
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--paper-raised);
+    padding: 24px 26px 26px;
+    margin: 24px 0 32px;
+  }
+  .calc-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px; }
+  .calc-head { font-family: var(--serif); font-weight: 700; font-size: 1.2rem; margin: 0 0 18px; }
+  .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 28px; margin-bottom: 8px; }
+  @media (max-width: 620px) { .calc-grid { grid-template-columns: 1fr; } }
+  .field label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .field label .val { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+  .field .desc { font-size: 12px; color: var(--ink-soft); margin-bottom: 8px; }
+  .field input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .field select {
+    width: 100%;
+    font: inherit;
+    font-size: 13.5px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .calc-output {
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .verdict-box {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .verdict-value {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 1.35rem;
+    color: var(--accent);
+    display: block;
+    margin-top: 2px;
+  }
+  .verdict-reason { font-size: 13px; color: var(--ink-soft); max-width: 40ch; }
+  .score-bars { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+  .score-bar { width: 66px; }
+  .score-bar .lbl { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-bottom: 4px; }
+  .score-bar .track { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .score-bar .fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .15s; }
+
+  footer {
+    max-width: 68ch;
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+    margin-top: 8px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+
+  .diagram-caption { font-size: 12.5px; color: var(--ink-soft); margin-top: -14px; }
+</style>
+
+<div class="shell">
+  <header class="masthead">
+    <p class="eyebrow">Multi-Agent Systems — Design Spec</p>
+    <h1>Router–Judge Architecture on Claude Fable &amp; Opus</h1>
+    <p class="subtitle">A planner–workers–evals harness built on Nate Jones' Ringer pattern: one expensive model plans and grades, many cheap models do the work, and nothing is trusted without a mechanical check.</p>
+    <div class="byline">
+      <span><b>Planner / Judge</b> Claude Fable 5, Opus 4.8</span>
+      <span><b>Workers</b> Sonnet 5, Haiku 4.5</span>
+      <span><b>Status</b> Design v1</span>
+    </div>
+  </header>
+
+  <nav class="rail">
+    <p class="rail-label">Contents</p>
+    <ol>
+      <li><a href="#agent-test"><span class="num">§1</span>The agent test</a></li>
+      <li><a href="#hard-limits"><span class="num">§2</span>Two hard limits</a></li>
+      <li><a href="#economics"><span class="num">§3</span>Token economics</a></li>
+      <li><a href="#roles"><span class="num">§4</span>Role separation</a></li>
+      <li><a href="#harness"><span class="num">§5</span>The harness</a></li>
+      <li><a href="#models"><span class="num">§6</span>Model assignment</a></li>
+      <li><a href="#no"><span class="num">§7</span>When to say no</a></li>
+      <li><a href="#impl"><span class="num">§8</span>Implementation</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="intro">
+      <p class="lede">Nate Jones' "Ringer" pattern reframes multi-agent design around a simple discipline: a strong model plans once and never touches the work; a swarm of cheap models burns the tokens; nothing ships without a mechanical check the model can't talk its way past. This document adapts that pattern to a concrete harness — <b>Claude Fable 5</b> or <b>Opus 4.8</b> as the planner and judge, <b>Sonnet 5</b> and <b>Haiku 4.5</b> as disposable workers — and treats the four-question "agent test" as a literal gate a task must pass before any agent is spun up at all.</p>
+      <p>The rest of this document is organized as the eight components of that strategy, in the order you'd actually apply them: classify the task, respect its constraints, split its roles, architect the harness, aim it at the right work, and price it before you commit.</p>
+    </section>
+
+    <section id="agent-test">
+      <div class="kicker"><span class="num">§1</span><h2>Start with the agent test, not the tools</h2></div>
+      <p>The question is never "can an agent do this" — nearly everything can be forced through an agent loop. The question is whether the task's <i>shape</i> justifies the coordination overhead. Four structural estimates, plus two economic dials, answer it in about a minute:</p>
+      <ul>
+        <li><b>Size</b> — does the task exceed what one agent can hold in context at full quality?</li>
+        <li><b>Independence</b> — can the pieces be worked without coordinating with each other?</li>
+        <li><b>Separation of concerns</b> — does correctness require a mind that didn't produce the work?</li>
+        <li><b>Checkability</b> — is verifying an answer much cheaper than producing one?</li>
+      </ul>
+      <p>Frequency and value are not a fifth structural question — they're the budget check that decides whether the trade is worth making at all, independent of shape.</p>
+
+      <div class="calc">
+        <p class="calc-title">Interactive — try it on your own task</p>
+        <p class="calc-head">The one-minute agent test</p>
+        <div class="calc-grid">
+          <div class="field">
+            <label>Size <span class="val" id="v-size">—</span></label>
+            <p class="desc">One calendar vs. thousands of documents/logs/emails.</p>
+            <input type="range" min="0" max="4" value="1" id="size" />
+          </div>
+          <div class="field">
+            <label>Independence <span class="val" id="v-indep">—</span></label>
+            <p class="desc">Can chunks be worked with zero coordination between them?</p>
+            <input type="range" min="0" max="4" value="1" id="indep" />
+          </div>
+          <div class="field">
+            <label>Separation of concerns <span class="val" id="v-sep">—</span></label>
+            <p class="desc">Must a different "mind" write vs. review, enter vs. approve?</p>
+            <input type="range" min="0" max="4" value="1" id="sep" />
+          </div>
+          <div class="field">
+            <label>Checkability <span class="val" id="v-check">—</span></label>
+            <p class="desc">Is there a cheap mechanical check (tests, source docs, exit codes)?</p>
+            <input type="range" min="0" max="4" value="1" id="check" />
+          </div>
+          <div class="field">
+            <label>Frequency</label>
+            <p class="desc">How often does this exact task recur?</p>
+            <select id="freq">
+              <option value="0">One-off</option>
+              <option value="1" selected>Monthly</option>
+              <option value="2">Weekly</option>
+              <option value="3">Daily or more</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Value of a good answer</label>
+            <p class="desc">What's it worth if the answer is right?</p>
+            <select id="value">
+              <option value="0">Low — nice to have</option>
+              <option value="1" selected>Moderate — real time saved</option>
+              <option value="2">High — hours of expert work</option>
+              <option value="3">Critical — costly if wrong</option>
+            </select>
+          </div>
+        </div>
+        <div class="calc-output">
+          <div>
+            <span class="verdict-box">Recommendation</span>
+            <span class="verdict-value" id="verdict">—</span>
+          </div>
+          <p class="verdict-reason" id="reason">Move the sliders to see how the shape of your task changes the recommendation.</p>
+          <div class="score-bars">
+            <div class="score-bar"><div class="lbl">SIZE</div><div class="track"><div class="fill" id="bar-size"></div></div></div>
+            <div class="score-bar"><div class="lbl">INDEP</div><div class="track"><div class="fill" id="bar-indep"></div></div></div>
+            <div class="score-bar"><div class="lbl">SEP</div><div class="track"><div class="fill" id="bar-sep"></div></div></div>
+            <div class="score-bar"><div class="lbl">CHECK</div><div class="track"><div class="fill" id="bar-check"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <p>This calculator is not decoration — it's the same scoring function implemented in <code>ringer/agent_test.py</code>, run as the mandatory first stage of the harness (§5). A task that scores low across the board is rejected before a single planner token is spent.</p>
+    </section>
+
+    <section id="hard-limits">
+      <div class="kicker"><span class="num">§2</span><h2>Respect the two hard limits</h2></div>
+      <p>Every multi-agent design that actually works is an answer to one of two constraints. Designs that ignore them don't fail loudly — they fail quietly, or just burn money.</p>
+
+      <div class="roles">
+        <div class="role-card">
+          <span class="tag" style="color: var(--accent)">Constraint 1</span>
+          <h4>Context / memory limit</h4>
+          <p>A single agent's window fills up and quality degrades, even with compaction. Once a task is bigger, longer, or more heterogeneous than one context can hold coherently, splitting into independent chunks stops being optional.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag" style="color: var(--accent)">Constraint 2</span>
+          <h4>Validation limit</h4>
+          <p>Multi-agent systems generate a pile of candidate answers. Without a strong, preferably automatic evaluator, the correct answer is in the pile but never identified — and every extra token spent generating alternatives was wasted.</p>
+        </div>
+      </div>
+
+      <p>In this harness, Constraint 1 is answered by the planner/worker split itself (§5): the planner never reads the full corpus, it writes a spec per unit of work and hands each unit to a worker with a clean, bounded context. Constraint 2 is answered by making the <b>mechanical checker</b> a first-class stage that runs before the judge ever sees the output — see §5.</p>
+    </section>
+
+    <section id="economics">
+      <div class="kicker"><span class="num">§3</span><h2>Spend tokens deliberately — attempts paired with evals</h2></div>
+      <p>Two results frame the economics here. Stanford (2024) showed that giving a cheap model repeated attempts follows a smooth improvement curve — up to roughly 100 attempts — but only if something can pick the right answer out of the pile; past that point, more attempts without a checker are wasted compute. Separately, Anthropic's internal multi-agent research system found that the single biggest predictor of quality wasn't prompt cleverness, it was <i>how much the system was allowed to think</i> — token spend, spent in a structured way, beat a single frontier model working alone.</p>
+      <p>The operating rule that follows: use the multi-agent structure to buy more attempts and more perspectives, never as a way to smuggle in a bigger single model. And never generate a token you don't have a way to grade — an unchecked attempt is not an asset, it's a liability sitting in the pile.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Model</th><th>Role in this harness</th><th class="num">Input / MTok</th><th class="num">Output / MTok</th></tr></thead>
+          <tbody>
+            <tr><td><code>claude-fable-5</code></td><td>Planner (hard specs) &amp; escalation judge</td><td class="num">$10.00</td><td class="num">$50.00</td></tr>
+            <tr><td><code>claude-opus-4-8</code></td><td>Default planner / default judge</td><td class="num">$5.00</td><td class="num">$25.00</td></tr>
+            <tr><td><code>claude-sonnet-5</code></td><td>Default worker</td><td class="num">$2.00*</td><td class="num">$10.00*</td></tr>
+            <tr><td><code>claude-haiku-4-5</code></td><td>High-volume / mechanical-only worker</td><td class="num">$1.00</td><td class="num">$5.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size: 12.5px; color: var(--ink-soft); margin-top: -14px;">* introductory Sonnet 5 pricing through 2026-08-31; standard rate is $3.00 / $15.00.</p>
+      <p>Because planning and judging happen once per task (or once per batch) while worker calls happen once per unit of work, the harness naturally spends its expensive tokens on the smallest number of calls and its cheap tokens on the largest. A 40-document audit might make one Opus planning call, two hundred Sonnet worker calls, and a double-digit number of Opus judge calls on the outputs the mechanical checker couldn't resolve on its own — see §6 for the full assignment logic.</p>
+    </section>
+
+    <section id="roles">
+      <div class="kicker"><span class="num">§4</span><h2>Split work along roles, not along model capability</h2></div>
+      <p>Some separations exist to fix a capability gap; the author/critic split exists to fix a <i>conflict of interest</i> — the same reason a company doesn't let the person who enters a payment also approve it. An agent gives you something a single human reviewer structurally can't: a mind that has genuinely never seen the draft, the product page, or the contract, on demand, for free.</p>
+      <div class="roles">
+        <div class="role-card">
+          <span class="tag">Planner</span>
+          <h4>Writes specs, never does the work</h4>
+          <p>Reads the task shape, breaks it into independently checkable units, writes one spec per unit including its acceptance criteria. Never touches source material directly at scale.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag">Worker</span>
+          <h4>Burns tokens, self-confidence ignored</h4>
+          <p>Executes one spec: reads, extracts, drafts, codes. Attaches sources for every claim. Its own stated confidence is never trusted or scored.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag">Checker</span>
+          <h4>Mechanical, deterministic, cheap</h4>
+          <p>No model call at all where possible — schema validation, source-attachment checks, exit codes, regex, diff-against-ground-truth. Runs before the judge on every result.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag">Judge</span>
+          <h4>Fresh eyes, never the author</h4>
+          <p>Sees only the worker's output and the spec — never the worker's reasoning trace or confidence claims. Escalated to only for what the mechanical checker can't resolve.</p>
+        </div>
+      </div>
+      <p>The judge is deliberately kept ignorant of anything that would contaminate it: it doesn't see which worker produced the output, doesn't see prior attempts, and doesn't see the worker's self-assessment. That's the "fresh mind on demand" the brief calls for — de-biased review a human reviewer, who's usually seen the draft evolve, can't easily replicate.</p>
+    </section>
+
+    <section id="harness">
+      <div class="kicker"><span class="num">§5</span><h2>Architect the harness: planner, workers, checks, judge, scorecard</h2></div>
+      <p>The concrete pipeline. The planner runs once. Workers run in parallel, as many as the task's independence score allows. Every result passes the mechanical checker before it's allowed near the judge — and the judge is a cost center reserved for what code can't decide.</p>
+
+      <div class="pipeline">
+        <div class="stage">
+          <div class="role">Fable 5 / Opus 4.8</div>
+          <div class="name">Planner</div>
+          <div class="detail">Runs the agent test, decomposes into units, writes one spec + acceptance criteria per unit.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="fanout">
+          <div class="stage"><div class="role">Sonnet 5</div><div class="name">Worker A</div></div>
+          <div class="stage"><div class="role">Haiku 4.5</div><div class="name">Worker B</div></div>
+          <div class="stage"><div class="role">Sonnet 5</div><div class="name">Worker N…</div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">Deterministic</div>
+          <div class="name">Mechanical checker</div>
+          <div class="detail">Schema, source-attachment, exit codes. No model call. Rejects or passes.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">Opus 4.8</div>
+          <div class="name">Judge</div>
+          <div class="detail">Only sees checker-passed work needing subjective review. Fresh context, no author identity.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">SQLite + CLI</div>
+          <div class="name">Scorecard</div>
+          <div class="detail">Cost, pass rate, retries, per-unit status, recommendations.</div>
+        </div>
+      </div>
+      <p class="diagram-caption">Failures at either the checker or the judge loop back to a fresh worker call with the failure reason appended to the spec — never a bare retry of the same prompt.</p>
+
+      <h3>Retry semantics</h3>
+      <p>A failed unit doesn't just re-run — it re-runs with the specific failure appended to its spec ("source citation missing for claim 3" / "schema validation failed: expected ISO date, got 'March 2024'"). This is the mechanism that turns Stanford's "more attempts" curve into something that actually converges: each retry is strictly better-informed than the last, not a fresh roll of the dice. Units are capped at a configurable retry ceiling (default 3) before they're marked <span class="pill no">needs-human</span> and surfaced on the scorecard rather than silently dropped or silently accepted.</p>
+
+      <h3>Why the judge is rationed</h3>
+      <p>The judge model is the most expensive call in the system per invocation, and LLM judgment doesn't get cheaper by asking nicely — so the harness treats it as a scarce resource routed only to what the mechanical checker structurally cannot decide: tone, completeness of an argument, whether a summary actually represents its source. Anything with a mechanical answer — did the number parse, does the citation exist, did the test pass — never reaches the judge at all. This is the direct implementation of "checkability" from §1: the cheaper the check, the more attempts you can afford to burn before the check has to run.</p>
+    </section>
+
+    <section id="models">
+      <div class="kicker"><span class="num">§6</span><h2>Model assignment logic</h2></div>
+      <p>Model choice is a function of role, not a static default. The harness resolves it per call:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Situation</th><th>Model</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Routine planning — decomposing a well-understood pile</td><td><code>claude-opus-4-8</code></td><td>Strong enough to write correct specs; far cheaper than Fable per token.</td></tr>
+            <tr><td>Planning a genuinely novel or ambiguous task shape</td><td><code>claude-fable-5</code></td><td>Long-horizon reasoning and ambiguity-handling justify the premium — spent once, not per unit.</td></tr>
+            <tr><td>Default worker — extraction, drafting, coding, summarizing</td><td><code>claude-sonnet-5</code></td><td>Near-Opus quality on agentic/coding work at a fraction of the cost; this is where token volume lives.</td></tr>
+            <tr><td>High-volume, low-complexity worker — classification, simple lookups</td><td><code>claude-haiku-4-5</code></td><td>Cheapest tier; used when the spec is narrow enough that Haiku's ceiling doesn't matter.</td></tr>
+            <tr><td>Default judge — most checker-escalated review</td><td><code>claude-opus-4-8</code></td><td>Independent of the worker tier; good judgment at a cost the retry volume can sustain.</td></tr>
+            <tr><td>High-stakes judge — compliance, legal, financial sign-off units</td><td><code>claude-fable-5</code></td><td>Escalate only the subset of units flagged as high-value by the task's own economics (§3).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Workers and the judge are never the same model instance or even the same conversation — no shared context, no shared cache, no way for the judge to have absorbed the worker's framing. That separation is enforced structurally in <code>ringer/orchestrator.py</code>, not by convention.</p>
+    </section>
+
+    <section id="no">
+      <div class="kicker"><span class="num">§7</span><h2>Know when to say no</h2></div>
+      <p>A disciplined strategy says "no agents here" as often as "a team here." Three shapes reliably don't clear the bar:</p>
+      <div class="roles">
+        <div class="role-card">
+          <span class="tag">Too small</span>
+          <h4>Bounded, single-context tasks</h4>
+          <p>Scheduling around one calendar, a single short document. One chat turn is the correct multi-agent system: zero agents.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag">Too subjective</span>
+          <h4>Deep judgment calls</h4>
+          <p>Which candidate to hire, which strategic bet to make, what to name the product. AI can research and structure the options; the decision stays human.</p>
+        </div>
+        <div class="role-card">
+          <span class="tag">Too coupled</span>
+          <h4>Entangled work with no natural split</h4>
+          <p>Code changes that touch a single tight algorithm rarely decompose into independent units — organize into independent chunks first, or don't multi-agent it at all.</p>
+        </div>
+      </div>
+      <p>The agent test in §1 is the harness's own gate for this — a task that scores low on size, independence, and checkability, or whose frequency/value doesn't clear the token spend, is rejected at the planner's first pass rather than dutifully decomposed anyway.</p>
+    </section>
+
+    <section id="impl">
+      <div class="kicker"><span class="num">§8</span><h2>Implementation</h2></div>
+      <p>The harness ships as a small, pluggable Python package — <code>ringer/</code> — with no workload baked in. You supply a worker prompt/spec shape and a checker function; the package supplies the planner call, the parallel worker pool, the retry loop, the judge escalation, and the cost/pass-rate scorecard.</p>
+      <pre><code>ringer/
+  agent_test.py    # §1 — the four-question + economics scorer (same logic as the calculator above)
+  models.py        # model IDs, pricing table, role → model resolution (§6)
+  planner.py       # Fable/Opus planning call → list of TaskSpec
+  worker.py        # Sonnet/Haiku worker pool, async, spec in → WorkResult out
+  checker.py       # pluggable deterministic Checker protocol + example checkers
+  judge.py         # Opus/Fable judge call, fresh-context, checker-escalated only
+  orchestrator.py  # wires planner → workers → checker → judge → retry → scorecard
+  scorecard.py     # SQLite-backed run ledger + CLI report
+  cli.py           # `ringer run task.yaml`
+examples/
+  extract_invoices/  # a worked "pile of documents" example end to end</code></pre>
+      <p>See the repository README for setup and a runnable example. The scorecard is queryable mid-run — cost-to-date, pass rate by unit type, and units currently stuck in retry are all live numbers, not a post-hoc report.</p>
+    </section>
+
+    <footer>
+      Design spec for a Claude-API multi-agent harness, adapted from Nate Jones' Ringer concept. Model IDs and pricing current as of this document's writing — see <code>ringer/models.py</code> for the source of truth used at runtime.
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  var ids = ["size", "indep", "sep", "check"];
+  var labels = ["v-size", "v-indep", "v-sep", "v-check"];
+  var bars = ["bar-size", "bar-indep", "bar-sep", "bar-check"];
+  var descTerms = [
+    ["a single calendar", "a small folder", "a few dozen files", "hundreds of documents", "thousands of docs, logs, or emails"],
+    ["fully entangled", "mostly sequential", "some parallel chunks", "mostly independent", "fully independent units"],
+    ["none needed", "light self-review ok", "helpful but optional", "recommended", "required — conflict of interest"],
+    ["none available", "slow / manual only", "partial coverage", "good automated checks", "cheap, near-total mechanical check"]
+  ];
+
+  function readInputs() {
+    return ids.map(function (id) { return parseInt(document.getElementById(id).value, 10); });
+  }
+
+  function classify(vals, freq, value) {
+    var size = vals[0], indep = vals[1], sep = vals[2], check = vals[3];
+    var structural = size + indep + check; // separation is a role signal, not a size signal
+    var budgetOk = (freq + value) >= 2;
+
+    if (size <= 1 && indep <= 1 && check <= 1 && sep <= 1) {
+      return { verdict: "No AI", reason: "Small, entangled, and unchecked — a human just does this faster than any harness could." };
+    }
+    if (sep >= 3 && check <= 2) {
+      return { verdict: "Multi-agent (roles)", reason: "The separation-of-concerns signal is high enough that a single agent reviewing its own work is the actual risk, regardless of size." };
+    }
+    if (size <= 1 && indep <= 2) {
+      return { verdict: "Single agent", reason: "Fits comfortably in one context and doesn't decompose into independent chunks — a team would just add coordination overhead." };
+    }
+    if (!budgetOk) {
+      return { verdict: "Single agent", reason: "The task shape could support a team, but low frequency and low value don't justify the extra token spend yet." };
+    }
+    if (check <= 1) {
+      return { verdict: "Single agent (for now)", reason: "Large and independent, but with no cheap way to check results — spin up workers only once you've built a checker, or you'll generate a pile you can't grade." };
+    }
+    return { verdict: "Multi-agent", reason: "Large, independent, and checkable — the classic 'pile' shape this harness is built for." };
+  }
+
+  function render() {
+    var vals = readInputs();
+    for (var i = 0; i < 4; i++) {
+      document.getElementById(labels[i]).textContent = descTerms[i][vals[i]];
+      document.getElementById(bars[i]).style.width = (vals[i] / 4 * 100) + "%";
+    }
+    var freq = parseInt(document.getElementById("freq").value, 10);
+    var value = parseInt(document.getElementById("value").value, 10);
+    var result = classify(vals, freq, value);
+    var verdictEl = document.getElementById("verdict");
+    verdictEl.textContent = result.verdict;
+    document.getElementById("reason").textContent = result.reason;
+  }
+
+  ids.concat(["freq", "value"]).forEach(function (id) {
+    document.getElementById(id).addEventListener("input", render);
+  });
+  render();
+})();
+</script>
