@@ -16,10 +16,29 @@ from typing import Any
 from . import judge as judge_mod
 from . import planner as planner_mod
 from . import worker as worker_mod
+from .agent_test import AgentTestInputs, AgentTestResult
+from .agent_test import score as score_agent_test
 from .checker import Checker
 from .models import Tier
 from .scorecard import Scorecard
 from .spec import Attempt, TaskSpec, UnitResult, UnitStatus
+
+
+class AgentTestGateError(RuntimeError):
+    """Raised when a task's own agent-test score doesn't clear the bar for
+    multi-agent execution (docs/design.html §1/§7) and OrchestratorConfig
+    .force wasn't set. Carries the full AgentTestResult so a caller (e.g.
+    the CLI) can show the verdict and reasoning instead of a bare crash --
+    the whole point is to stop *before* any planner or worker tokens are
+    spent, not just log a complaint after the fact.
+    """
+
+    def __init__(self, result: AgentTestResult):
+        self.result = result
+        super().__init__(
+            f"agent test recommends {result.label!r}, not multi-agent: {result.reason} "
+            f"(pass force=True on OrchestratorConfig to run anyway)"
+        )
 
 
 @dataclass
@@ -59,6 +78,12 @@ class OrchestratorConfig:
     max_concurrency: int = 8
     worker_effort: str = "medium"
     scorecard_path: str = "ringer_scorecard.sqlite3"
+    # When set, run() scores this against the agent test (§1) *before*
+    # spending a single token on planning, and refuses to proceed unless the
+    # verdict clears multi-agent -- or force=True overrides the refusal.
+    # None (the default) skips the gate entirely, matching prior behavior.
+    agent_test: AgentTestInputs | None = None
+    force: bool = False
 
 
 async def _run_unit(
@@ -152,6 +177,11 @@ async def _run_unit(
 
 
 async def run(config: OrchestratorConfig) -> RunReport:
+    if config.agent_test is not None:
+        result = score_agent_test(config.agent_test)
+        if not result.should_build_multi_agent and not config.force:
+            raise AgentTestGateError(result)
+
     scorecard = Scorecard(config.scorecard_path)
     run_id = scorecard.start_run(config.task_description)
 

@@ -93,6 +93,59 @@ with:
 python -m ringer.cli report extract_invoices_scorecard.sqlite3 <run_id>
 ```
 
+## Prompt-driven flow — no Python required
+
+If you don't want to hand-write an `OrchestratorConfig`, give it a prompt
+and a folder of raw material instead:
+
+```bash
+ringer intake "extract itemized totals from these receipts" --units ./receipts/
+```
+
+This runs a separate intake call (Opus by default) that estimates the
+agent-test dimensions from your prompt and a preview of each unit,
+proposes an output schema, and picks whatever checks from a fixed menu fit
+(currently: schema validation, numeric reconciliation, verbatim-quote
+verification). It then prints all of that — verdict, schema, checks, and
+the intake call's own cost — and asks you to confirm before spending
+anything on actual execution:
+
+```
+=== ringer intake proposal ===
+units:      12
+agent test: Multi-agent -- Large, independent, and checkable...
+rationale:  Twelve independent receipts; totals and line items are both
+            mechanically verifiable against each receipt's own text.
+checks:
+  - schema validation against the proposed output shape
+  - numeric reconciliation: items[].amount must sum to total
+  - verbatim quote check: items[].quote must appear in the unit's own input
+proposed output schema: {...}
+intake call cost: $0.0091 (claude-opus-4-8, 1840 in / 210 out)
+
+Proceed with this plan? [y/N]:
+```
+
+Answering `y` runs the exact same planner → workers → checker → judge →
+scorecard pipeline as `ringer run` — `ringer intake` only replaces how the
+`OrchestratorConfig` gets built, not what runs it. `--units` takes either a
+directory (each file becomes one unit) or a `.json` file of
+`{"unit_id": "content", ...}`. `--allow-openrouter` and `--force` mirror
+the flags of the same name elsewhere; `--yes` skips the interactive
+confirmation for scripting.
+
+**What intake will never do: write your checker for you.** The checker is
+the one thing in this design that's supposed to be mechanical and
+inspectable — an LLM inventing the gate meant to catch its own mistakes
+would quietly undo that. So `ringer/intake.py` only ever composes checks
+from `checker.py`'s fixed factories; if your task needs verification the
+menu doesn't cover, the proposal says so in its rationale and falls back
+to schema-only checking, visible to you before you confirm anything —
+never silently invented on your behalf. If your checker needs are more
+involved than that menu, write an `OrchestratorConfig` by hand (below);
+`ringer intake` isn't trying to replace that path, just avoid it when a
+generic check is genuinely all a task needs.
+
 ## Build your own task
 
 A task is a zero-argument Python factory returning an
@@ -113,6 +166,7 @@ worked example. The four things you supply:
    checker-passed result to the judge instead of trusting it outright.
 
 ```python
+from ringer.agent_test import AgentTestInputs
 from ringer.checker import compose, schema_checker
 from ringer.orchestrator import OrchestratorConfig
 from ringer.models import Tier
@@ -129,6 +183,8 @@ def build_task() -> OrchestratorConfig:
         max_retries=3,
         max_concurrency=8,
         scorecard_path="my_task_scorecard.sqlite3",
+        # optional -- see "Before building a task at all" below
+        agent_test=AgentTestInputs(size=4, independence=4, separation=1, checkability=3, frequency=2, value=2),
     )
 ```
 
@@ -139,7 +195,9 @@ Then: `python -m ringer.cli run mymodule:build_task`.
 Run the agent test in `docs/design.html` §1 (or `ringer.agent_test.score`)
 on the task first. It's a gate, not a formality — a task that's small,
 entangled, and uncheckable should stay a single chat turn, and the harness
-will cost you real tokens decomposing it anyway if you skip the check:
+will cost you real tokens decomposing it anyway if you skip the check.
+
+Score it standalone:
 
 ```python
 from ringer import AgentTestInputs, score
@@ -147,6 +205,13 @@ from ringer import AgentTestInputs, score
 result = score(AgentTestInputs(size=4, independence=4, separation=1, checkability=3, frequency=2, value=2))
 print(result.verdict, "-", result.reason)
 ```
+
+Or set `agent_test=` on the `OrchestratorConfig` (as above) and it becomes
+an *enforced* gate: `orchestrator.run()` scores it before the planner is
+ever invoked and raises `AgentTestGateError` if the verdict doesn't clear
+multi-agent, unless you also pass `force=True`. `ringer intake` (above)
+does this automatically for every prompt-driven run — you never have to
+remember to check it yourself.
 
 ## Project layout
 
@@ -161,20 +226,23 @@ ringer/
   worker.py                 executes one TaskSpec against either backend, self-confidence ignored (§4/§5)
   checker.py                deterministic Checker protocol + example checkers (§4/§5)
   judge.py                  fresh-eyes review, rationed to checker-flagged units (§4/§5)
-  orchestrator.py           wires it all together + retry-with-failure-context (§5)
+  orchestrator.py           wires it all together + retry-with-failure-context + the agent-test gate (§5)
+  intake.py                 prompt + raw units → agent-test estimate, proposed schema, checker (menu only)
   scorecard.py               SQLite-backed cost/pass-rate ledger (§5)
-  cli.py                     `ringer run` / `ringer report`
+  cli.py                     `ringer run` / `ringer intake` / `ringer report`
 examples/extract_invoices/  a worked pile-of-documents task, end to end
-scripts/dry_run_check.py    offline wiring check (mocks the model calls — no API key needed)
+scripts/dry_run_check.py         offline wiring check for `ringer run` (mocks the model calls)
+scripts/dry_run_intake_check.py  offline wiring check for `ringer intake`, same idea
 ```
 
 ## Verifying without spending tokens
 
 ```bash
 python scripts/dry_run_check.py
+python scripts/dry_run_intake_check.py
 ```
 
-Monkeypatches the planner/worker/judge calls with deterministic fakes and
-asserts the retry loop, concurrency, and scorecard recording all behave —
-useful for CI or for checking a change to `orchestrator.py` without paying
-for live model calls.
+Both monkeypatch the model calls with deterministic fakes and assert the
+retry loop, concurrency, scorecard recording, and (for the second script)
+the full prompt → proposal → confirm → execute path all behave — useful
+for CI or for checking a change without paying for live model calls.
