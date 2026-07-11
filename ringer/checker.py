@@ -76,6 +76,64 @@ def source_attachment_checker(
     return _check
 
 
+def numeric_reconciliation_checker(
+    *, total_field: str, parts_field: str, amount_field: str, tolerance: float = 0.01
+) -> Checker:
+    """Reject outputs where a stated total doesn't match the sum of its parts.
+
+    output[total_field] must equal sum(part[amount_field] for part in
+    output[parts_field]) within `tolerance`. Generalizes the invoice
+    example's total/line-item check for any "parts must sum to a total"
+    shape (invoices, budgets, itemized receipts, timesheets, ...).
+    """
+
+    def _check(spec, output: Any) -> CheckResult:  # noqa: ANN001
+        if not isinstance(output, dict):
+            return CheckResult(passed=False, reason="output is not an object")
+        parts = output.get(parts_field, [])
+        computed = round(sum(p.get(amount_field, 0) for p in parts if isinstance(p, dict)), 2)
+        stated = round(output.get(total_field, 0) or 0, 2)
+        if abs(computed - stated) > tolerance:
+            return CheckResult(
+                passed=False,
+                reason=f"{parts_field} sum to {computed} but {total_field} is {stated}",
+            )
+        return CheckResult(passed=True, reason=f"{total_field} reconciles with {parts_field}")
+
+    return _check
+
+
+def verbatim_quote_checker(*, claims_field: str, quote_field: str) -> Checker:
+    """Reject outputs whose claimed quotes don't actually appear in the unit's input.
+
+    Every entry in output[claims_field] (a list of dicts) must have a
+    quote_field whose value is a verbatim (whitespace/case-normalized)
+    substring of spec.input_data. No model call, no known-sources set to
+    maintain -- just a check against the ground truth the unit was given.
+    Generalizes the invoice example's source-quote check for any
+    extraction task where "don't invent facts not in the source" matters.
+    """
+
+    def _check(spec, output: Any) -> CheckResult:  # noqa: ANN001
+        if not isinstance(output, dict):
+            return CheckResult(passed=False, reason="output is not an object")
+        normalized_text = " ".join(str(spec.input_data).split()).lower()
+        claims = output.get(claims_field, [])
+        for i, claim in enumerate(claims):
+            quote = claim.get(quote_field, "") if isinstance(claim, dict) else ""
+            normalized_quote = " ".join(str(quote).split()).lower()
+            if not normalized_quote or normalized_quote not in normalized_text:
+                return CheckResult(
+                    passed=False,
+                    reason=f"{claims_field}[{i}].{quote_field} not found verbatim in unit input",
+                )
+        return CheckResult(
+            passed=True, reason=f"all {claims_field}.{quote_field} verified verbatim against unit input"
+        )
+
+    return _check
+
+
 def exit_code_checker(runner: Callable[[Any], int]) -> Checker:
     """Reject outputs whose associated command/test run exits non-zero.
 

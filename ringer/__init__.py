@@ -9,7 +9,7 @@ rationale behind each module.
 from .agent_test import AgentTestInputs, AgentTestResult, score
 from .checker import Checker, CheckResult, compose, schema_checker, source_attachment_checker
 from .models import Provider, Role, Tier, resolve_model
-from .orchestrator import OrchestratorConfig, RunReport, run
+from .orchestrator import AgentTestGateError, IntakeCostRecord, OrchestratorConfig, RunReport, run
 from .spec import TaskSpec, UnitResult, UnitStatus
 
 __all__ = [
@@ -25,6 +25,8 @@ __all__ = [
     "compose",
     "schema_checker",
     "source_attachment_checker",
+    "AgentTestGateError",
+    "IntakeCostRecord",
     "OrchestratorConfig",
     "RunReport",
     "run",

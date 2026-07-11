@@ -13,23 +13,68 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import _openrouter_client
 from . import judge as judge_mod
 from . import planner as planner_mod
 from . import worker as worker_mod
+from .agent_test import AgentTestInputs, AgentTestResult
+from .agent_test import score as score_agent_test
 from .checker import Checker
 from .models import Tier
-from .scorecard import Scorecard
+from .scorecard import CostSummary, Scorecard
 from .spec import Attempt, TaskSpec, UnitResult, UnitStatus
+
+
+@dataclass
+class IntakeCostRecord:
+    """The cost of an upstream `ringer intake` proposal call, passed through
+    so run() can persist it into the scorecard alongside execution costs --
+    see intake.py / cli.py `ringer intake`. None if a task was hand-written
+    via `ringer run` with no intake step.
+    """
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
+
+
+class AgentTestGateError(RuntimeError):
+    """Raised when a task's own agent-test score doesn't clear the bar for
+    multi-agent execution (docs/design.html §1/§7) and OrchestratorConfig
+    .force wasn't set. Carries the full AgentTestResult so a caller (e.g.
+    the CLI) can show the verdict and reasoning instead of a bare crash --
+    the whole point is to stop *before* any planner or worker tokens are
+    spent, not just log a complaint after the fact.
+    """
+
+    def __init__(self, result: AgentTestResult):
+        self.result = result
+        super().__init__(
+            f"agent test recommends {result.label!r}, not multi-agent: {result.reason} "
+            f"(pass force=True on OrchestratorConfig to run anyway)"
+        )
 
 
 @dataclass
 class RunReport:
     run_id: str
     units: list[UnitResult]
+    # Authoritative cost across every stage of this run -- intake (if any),
+    # planner, workers, and judge. Pulled from the scorecard itself rather
+    # than summed from `units`, which only ever covered worker+judge cost
+    # and silently excluded the once-per-run planner call.
+    cost_summary: CostSummary
+    # Whether OpenRouter was actually available to the planner this run --
+    # i.e. config.allow_openrouter was True *and* OPENROUTER_API_KEY was
+    # set. False whenever the task didn't ask for it, and also False when
+    # it asked but the key wasn't configured -- callers that want to tell
+    # those two apart should check config.allow_openrouter themselves.
+    openrouter_available: bool = False
 
     @property
     def total_cost(self) -> float:
-        return sum(u.total_cost for u in self.units)
+        return self.cost_summary.total_cost
 
     @property
     def pass_rate(self) -> float:
@@ -52,13 +97,29 @@ class OrchestratorConfig:
     checker: Checker
     planner_tier: Tier = Tier.DEFAULT
     judge_tier: Tier = Tier.DEFAULT
-    # Let the planner route units to OpenRouter open-weight workers (GLM 5.2,
-    # Kimi K2) as a cost tier. Off by default -- see planner.py docstring.
+    # Requests that the planner may route units to OpenRouter open-weight
+    # workers as a cost tier -- but this is necessary, not sufficient. run()
+    # only honors it if OPENROUTER_API_KEY is actually set in the
+    # environment (_openrouter_client.is_configured()); otherwise it's
+    # silently treated as False and the planner never even sees the
+    # OpenRouter tiers, regardless of what this task requests. An
+    # environment that never provisions the key is Anthropic-only by
+    # construction, not by every task remembering not to opt in.
     allow_openrouter: bool = False
     max_retries: int = 3
     max_concurrency: int = 8
     worker_effort: str = "medium"
     scorecard_path: str = "ringer_scorecard.sqlite3"
+    # When set, run() scores this against the agent test (§1) *before*
+    # spending a single token on planning, and refuses to proceed unless the
+    # verdict clears multi-agent -- or force=True overrides the refusal.
+    # None (the default) skips the gate entirely, matching prior behavior.
+    agent_test: AgentTestInputs | None = None
+    force: bool = False
+    # Set by `ringer intake` when this config was built from a prompt
+    # proposal, so its cost is persisted alongside execution -- see
+    # IntakeCostRecord above. None for a hand-written OrchestratorConfig.
+    intake_cost: IntakeCostRecord | None = None
 
 
 async def _run_unit(
@@ -152,15 +213,44 @@ async def _run_unit(
 
 
 async def run(config: OrchestratorConfig) -> RunReport:
+    if config.agent_test is not None:
+        result = score_agent_test(config.agent_test)
+        if not result.should_build_multi_agent and not config.force:
+            raise AgentTestGateError(result)
+
     scorecard = Scorecard(config.scorecard_path)
     run_id = scorecard.start_run(config.task_description)
+
+    if config.intake_cost is not None:
+        scorecard.record_intake_cost(
+            run_id,
+            model=config.intake_cost.model,
+            input_tokens=config.intake_cost.input_tokens,
+            output_tokens=config.intake_cost.output_tokens,
+            cost=config.intake_cost.cost,
+        )
+
+    # Necessary-but-not-sufficient: a task can request OpenRouter, but the
+    # environment decides whether it's actually reachable. The planner is
+    # never even told OpenRouter tiers exist unless both are true -- this
+    # is what makes an environment without OPENROUTER_API_KEY provably
+    # Anthropic-only, rather than merely "Anthropic-only as long as no task
+    # opts in by mistake."
+    effective_allow_openrouter = config.allow_openrouter and _openrouter_client.is_configured()
 
     plan_result = await planner_mod.plan(
         task_description=config.task_description,
         output_schema=config.output_schema,
         units=config.unit_previews,
         tier=config.planner_tier,
-        allow_openrouter=config.allow_openrouter,
+        allow_openrouter=effective_allow_openrouter,
+    )
+    scorecard.record_planner_cost(
+        run_id,
+        model=plan_result.model,
+        input_tokens=plan_result.input_tokens,
+        output_tokens=plan_result.output_tokens,
+        cost=plan_result.cost,
     )
 
     for spec in plan_result.specs:
@@ -183,5 +273,11 @@ async def run(config: OrchestratorConfig) -> RunReport:
     )
 
     scorecard.finish_run(run_id)
+    cost_summary = scorecard.cost_summary(run_id)
     scorecard.close()
-    return RunReport(run_id=run_id, units=list(unit_results))
+    return RunReport(
+        run_id=run_id,
+        units=list(unit_results),
+        cost_summary=cost_summary,
+        openrouter_available=effective_allow_openrouter,
+    )

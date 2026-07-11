@@ -9,10 +9,10 @@ work that doesn't need to share context at all.
 
 from __future__ import annotations
 
-from ringer.checker import CheckResult, compose, schema_checker
+from ringer.agent_test import AgentTestInputs
+from ringer.checker import compose, numeric_reconciliation_checker, schema_checker, verbatim_quote_checker
 from ringer.models import Tier
 from ringer.orchestrator import OrchestratorConfig
-from ringer.spec import TaskSpec
 
 from .data import INVOICES
 
@@ -52,41 +52,19 @@ OUTPUT_SCHEMA = {
 }
 
 
-def _total_matches_line_items(spec: TaskSpec, output: dict) -> CheckResult:
-    line_items = output.get("line_items", [])
-    computed = round(sum(item.get("amount", 0) for item in line_items), 2)
-    stated = round(output.get("total_amount", 0), 2)
-    if abs(computed - stated) > 0.01:
-        return CheckResult(
-            passed=False,
-            reason=f"line items sum to {computed} but total_amount is {stated}",
-        )
-    return CheckResult(passed=True, reason="total_amount reconciles with line items")
-
-
-def _quotes_verifiable(spec: TaskSpec, output: dict) -> CheckResult:
-    """Every source_quote must actually appear in the invoice text.
-
-    This is the literal implementation of "sources must be attached and
-    must match the task; entries that fail are rejected" from the brief --
-    no model call, just a substring check against ground truth.
-    """
-    normalized_text = " ".join(str(spec.input_data).split()).lower()
-    for i, item in enumerate(output.get("line_items", [])):
-        quote = " ".join(item.get("source_quote", "").split()).lower()
-        if not quote or quote not in normalized_text:
-            return CheckResult(
-                passed=False,
-                reason=f"line_item {i} source_quote {quote!r} not found verbatim in invoice text",
-            )
-    return CheckResult(passed=True, reason="all source_quotes verified verbatim against invoice text")
-
-
 def build_checker():
+    """Schema + totals-reconcile + every quote is verbatim in the source --
+    the literal implementation of "sources must be attached and must match
+    the task; entries that fail are rejected" from the brief. All three are
+    generic factories from checker.py; nothing here is invoice-specific
+    except the field names.
+    """
     return compose(
         schema_checker(OUTPUT_SCHEMA),
-        _total_matches_line_items,
-        _quotes_verifiable,
+        numeric_reconciliation_checker(
+            total_field="total_amount", parts_field="line_items", amount_field="amount"
+        ),
+        verbatim_quote_checker(claims_field="line_items", quote_field="source_quote"),
     )
 
 
@@ -114,6 +92,14 @@ def build_task(allow_openrouter: bool = False) -> OrchestratorConfig:
         max_retries=2,
         max_concurrency=4,
         scorecard_path="extract_invoices_scorecard.sqlite3",
+        # docs/design.html §1 scoring for this task shape at production
+        # scale (hundreds of invoices, not just these four demo ones):
+        # independent per-invoice, strongly checkable (schema + totals +
+        # verbatim quotes), low separation-of-concerns need, comes up often
+        # enough and matters enough to be worth the token spend.
+        agent_test=AgentTestInputs(
+            size=3, independence=4, separation=1, checkability=4, frequency=2, value=2
+        ),
     )
 
 

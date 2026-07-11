@@ -403,6 +403,7 @@
       <li><a href="#models"><span class="num">§6</span>Model assignment</a></li>
       <li><a href="#no"><span class="num">§7</span>When to say no</a></li>
       <li><a href="#impl"><span class="num">§8</span>Implementation</a></li>
+      <li><a href="#intake"><span class="num">§9</span>Prompt to plan</a></li>
     </ol>
   </nav>
 
@@ -484,7 +485,7 @@
         </div>
       </div>
 
-      <p>This calculator is not decoration — it's the same scoring function implemented in <code>ringer/agent_test.py</code>, run as the mandatory first stage of the harness (§5). A task that scores low across the board is rejected before a single planner token is spent.</p>
+      <p>This calculator is not decoration — it's the same scoring function implemented in <code>ringer/agent_test.py</code>. Set it on a task's <code>OrchestratorConfig</code> and it becomes an enforced gate: a task that scores low across the board is refused before a single planner token is spent, unless the caller explicitly overrides it. §9 covers the case where you don't hand-write the task at all — a prompt gets scored automatically before you're even asked to confirm.</p>
     </section>
 
     <section id="hard-limits">
@@ -623,6 +624,10 @@
         </table>
       </div>
       <p>Workers and the judge are never the same model instance or even the same conversation — no shared context, no shared cache, no way for the judge to have absorbed the worker's framing. That separation is enforced structurally in <code>ringer/orchestrator.py</code>, not by convention. The judge itself never routes to OpenRouter, regardless of which tier a worker used — the fresh-eyes review has to be at least as reliable as the thing it's grading.</p>
+
+      <h3>Two locks on the OpenRouter tiers, not one</h3>
+      <p>"Opt-in" above means a task's <code>allow_openrouter</code> flag — but that's necessary, not sufficient. <code>orchestrator.run()</code> only honors it when <code>OPENROUTER_API_KEY</code> is actually set in the environment; otherwise the planner is never even told the OpenRouter tiers exist, regardless of what the task requested. A second check inside the worker's own tier resolution does the same thing as a fallback, in case a stale or hand-built spec somehow still carries an OpenRouter tier.</p>
+      <p>The practical effect: an environment that simply never provisions an OpenRouter key — an enterprise deployment standardized on Anthropic, say, with no equivalent enterprise arrangement for a third-party aggregator — is Anthropic-only <i>by construction</i>, not by every task author remembering not to opt in. The reference example (<code>build_task_openrouter()</code>) keeps demonstrating the economics story in environments that do have a key configured; everywhere else, it silently degrades to Anthropic workers with a one-line note, never a failed run.</p>
     </section>
 
     <section id="no">
@@ -645,7 +650,7 @@
           <p>Code changes that touch a single tight algorithm rarely decompose into independent units — organize into independent chunks first, or don't multi-agent it at all.</p>
         </div>
       </div>
-      <p>The agent test in §1 is the harness's own gate for this — a task that scores low on size, independence, and checkability, or whose frequency/value doesn't clear the token spend, is rejected at the planner's first pass rather than dutifully decomposed anyway.</p>
+      <p>The agent test in §1 is the harness's own gate for this, and not just conceptually — <code>OrchestratorConfig.agent_test</code> scores the task before the planner is ever invoked, and refuses to run at all (<code>AgentTestGateError</code>) unless the verdict clears multi-agent or the caller passes <code>force=True</code>. A task that scores low on size, independence, and checkability, or whose frequency/value doesn't clear the token spend, is rejected before a single planning token is spent, not dutifully decomposed anyway.</p>
     </section>
 
     <section id="impl">
@@ -660,12 +665,53 @@
   worker.py           # dispatches each spec to Anthropic or OpenRouter, spec in → WorkResult out
   checker.py          # pluggable deterministic Checker protocol + example checkers
   judge.py            # Opus/Fable judge call, fresh-context, checker-escalated only, Anthropic only
-  orchestrator.py     # wires planner → workers → checker → judge → retry → scorecard
+  orchestrator.py     # wires planner → workers → checker → judge → retry → scorecard; gates on the agent test
+  intake.py           # §9 — prompt + raw units → agent-test estimate, proposed schema, checker (menu only)
+  cost_estimate.py    # §9 — rough pre-execution cost forecast, shown before you confirm
   scorecard.py        # SQLite-backed run ledger + CLI report
-  cli.py              # `ringer run task.yaml`
+  cli.py              # `ringer run <factory>` / `ringer intake "<prompt>" --units <dir>`
 examples/
   extract_invoices/  # a worked "pile of documents" example end to end, with an OpenRouter variant</code></pre>
       <p>See the repository README for setup and a runnable example. The scorecard is queryable mid-run — cost-to-date, pass rate by unit type, and units currently stuck in retry are all live numbers, not a post-hoc report.</p>
+    </section>
+
+    <section id="intake">
+      <div class="kicker"><span class="num">§9</span><h2>From a prompt to an execution plan</h2></div>
+      <p>Everything through §8 assumes a developer has already decided the task's shape and written the checker. <code>ringer intake "&lt;prompt&gt;" --units &lt;dir&gt;</code> is the front door for when that's not true yet — you hand it plain English and a folder of raw material, and it proposes the plan instead of you writing one.</p>
+
+      <div class="pipeline">
+        <div class="stage">
+          <div class="role">You</div>
+          <div class="name">Prompt + raw units</div>
+          <div class="detail">Plain English, plus a directory of files or a unit_id → content mapping.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">Opus 4.8</div>
+          <div class="name">Intake</div>
+          <div class="detail">Scores the agent test (§1), proposes an output schema, and picks checks — from a fixed menu only.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">You, again</div>
+          <div class="name">Confirm</div>
+          <div class="detail">Reads the verdict, schema, checks, intake cost, and an estimated execution cost range. y/n before any execution tokens are spent.</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage">
+          <div class="role">§5</div>
+          <div class="name">Existing pipeline</div>
+          <div class="detail">Planner → workers → checker → judge → scorecard, unchanged.</div>
+        </div>
+      </div>
+
+      <p>Two things this stage deliberately does <i>not</i> do. First, it never writes checker code. The whole harness's trust model depends on the checker being mechanical and inspectable — letting a model author the gate meant to catch that same model's mistakes would remove the one thing standing between "cheap worker" and "cheap worker nobody is checking" (§2). So intake only ever composes from a small, fixed library of deterministic factories in <code>checker.py</code> — schema validation, numeric reconciliation, verbatim-quote verification. If a task needs a check that isn't in the menu, intake says so in its rationale and falls back to schema-only validation, visible to you before you confirm, rather than inventing something to fill the gap.</p>
+
+      <p>Second, it never executes anything on your say-so alone twice. The agent test it estimates (§1) is the same <code>OrchestratorConfig.agent_test</code> gate every task can opt into: if the shape doesn't clear the bar for multi-agent — small, entangled, no way to check it — <code>ringer intake</code> refuses before the confirmation prompt even appears, the same way <code>ringer run</code> refuses for a hand-written task with a poor agent-test score. <code>--force</code> overrides either.</p>
+
+      <h3>Cost accounting: what's estimated, what's actual</h3>
+      <p>Two different numbers appear before you confirm, and it matters which is which. The <b>intake cost</b> is real — it's what the proposal call itself already spent, computed from its actual token usage the same way every other stage is. The <b>execution cost range</b> below it is a rough forecast, not a promise: <code>ringer/cost_estimate.py</code> converts each unit's character count to an approximate token count (no <code>count_tokens</code> round trip, no model call) and reports a low estimate (planner + one clean pass per unit) alongside a genuine worst case (every unit exhausts its retry budget <i>and</i> escalates to the judge). Actual cost for a well-checked task usually lands far closer to the low end; a wide gap between the two numbers is itself a signal that retries or judge calls, if they happen, are expensive relative to a single pass.</p>
+      <p>Once you confirm, every number the scorecard reports is actual, not estimated — including the intake call and the once-per-run planner call, both of which are now recorded into the same run's ledger as the workers and judge, so <code>ringer report</code> reflects the full cost of the episode from prompt to finished output, not just the execution slice of it.</p>
     </section>
 
     <footer>

@@ -28,6 +28,21 @@ class OpenRouterAuthError(RuntimeError):
     """Raised when OPENROUTER_API_KEY is missing."""
 
 
+def is_configured() -> bool:
+    """Whether OPENROUTER_API_KEY is set.
+
+    This is the actual gate on OpenRouter usage across the harness --
+    orchestrator.run() only lets the planner see OpenRouter worker tiers
+    when this is True, regardless of what a task's own `allow_openrouter`
+    says. A task can request OpenRouter; the environment decides whether
+    it's actually reachable. That means an environment that simply never
+    sets this key (e.g. an enterprise-Anthropic-only deployment) is
+    Anthropic-only by construction, not by every task remembering not to
+    opt in.
+    """
+    return bool(os.environ.get("OPENROUTER_API_KEY"))
+
+
 class CallResult:
     __slots__ = ("parsed", "input_tokens", "output_tokens", "cost", "served_by", "parse_error")
 
