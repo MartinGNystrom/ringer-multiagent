@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -50,7 +52,37 @@ def _note_if_openrouter_unreachable(config: OrchestratorConfig) -> None:
         )
 
 
+def _ensure_anthropic_credentials() -> None:
+    """Prompt for ANTHROPIC_API_KEY if nothing else is obviously configured.
+
+    Deliberately narrow: only fires for the two most common env vars, only
+    when stdin is an interactive terminal (never hangs a script or CI run
+    waiting on input that will never come), and never touches
+    OPENROUTER_API_KEY -- its absence is a deliberate "stay Anthropic-only"
+    signal (see the "two locks, not one" section of the design doc), not a
+    missing setup step to nag about. If the user has credentials configured
+    some other way (`ant auth login`, WIF), pressing Enter skips this and
+    the SDK resolves them as normal -- this is a convenience, not a gate.
+    Whatever's entered lives only in this process's environment; it's never
+    written to disk.
+    """
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return
+    if not sys.stdin.isatty():
+        return
+    print("No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN found in this environment.")
+    print("(Already authenticated via `ant auth login` or similar? Just press Enter.)")
+    try:
+        key = getpass.getpass("ANTHROPIC_API_KEY (input hidden, used for this run only): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if key:
+        os.environ["ANTHROPIC_API_KEY"] = key
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
+    _ensure_anthropic_credentials()
     factory = _load_callable(args.target)
     config: OrchestratorConfig = factory()
     _note_if_openrouter_unreachable(config)
@@ -127,6 +159,7 @@ def _print_cost_estimate(estimate: cost_estimate.ExecutionCostEstimate, allow_op
 
 
 def _cmd_intake(args: argparse.Namespace) -> None:
+    _ensure_anthropic_credentials()
     units = _load_units(args.units)
     unit_previews = [{"unit_id": uid, "preview": str(content)[:200]} for uid, content in units.items()]
 
