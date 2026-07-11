@@ -603,6 +603,9 @@
 
       <h3>Why the judge is rationed</h3>
       <p>The judge model is the most expensive call in the system per invocation, and LLM judgment doesn't get cheaper by asking nicely — so the harness treats it as a scarce resource routed only to what the mechanical checker structurally cannot decide: tone, completeness of an argument, whether a summary actually represents its source. Anything with a mechanical answer — did the number parse, does the citation exist, did the test pass — never reaches the judge at all. This is the direct implementation of "checkability" from §1: the cheaper the check, the more attempts you can afford to burn before the check has to run.</p>
+
+      <h3>Watching it happen, not just the result</h3>
+      <p>Because units run concurrently, a run can take a while, and a harness that says nothing until it's entirely done is a bad experience for exactly the workloads this design is for — hundreds of units, not four. <code>orchestrator.run()</code> takes an optional <code>on_event</code> callback invoked with a plain string every time something happens worth seeing: plan complete, each unit's attempt result, a judge escalation, a unit reaching a terminal state. <code>ringer run</code> / <code>ringer intake</code> wire this to stdout by default (prefixed per unit, since concurrent units interleave) — <code>--quiet</code> turns it off if you only want the final scorecard. Library callers get silence by default; nothing changes unless a callback is actually passed.</p>
     </section>
 
     <section id="models">
