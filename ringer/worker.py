@@ -53,6 +53,14 @@ class WorkResult:
     model: str
 
 
+_OPENROUTER_TIERS = (
+    Tier.OPENROUTER_GLM,
+    Tier.OPENROUTER_KIMI,
+    Tier.OPENROUTER_DEEPSEEK,
+    Tier.OPENROUTER_QWEN_CODER,
+)
+
+
 def _resolve_worker_tier(spec_tier: str) -> Tier:
     try:
         tier = _TIER_BY_SPEC_VALUE[spec_tier]
@@ -61,6 +69,13 @@ def _resolve_worker_tier(spec_tier: str) -> Tier:
     # Fail safe to DEFAULT rather than error out on a planner that
     # mistakenly emitted "escalated" (or any other non-worker tier) for a unit.
     if tier not in _WORKER_TIERS:
+        tier = Tier.DEFAULT
+    # Second safety net (the first is orchestrator.run() never telling the
+    # planner OpenRouter tiers exist without a key): if a spec somehow still
+    # carries an OpenRouter tier -- a stale plan, a hand-built TaskSpec --
+    # and the key isn't configured, fall back to Anthropic rather than
+    # attempting a call guaranteed to fail on auth.
+    if tier in _OPENROUTER_TIERS and not _openrouter_client.is_configured():
         tier = Tier.DEFAULT
     return tier
 

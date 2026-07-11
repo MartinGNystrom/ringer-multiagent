@@ -36,18 +36,35 @@ export OPENROUTER_API_KEY=sk-or-...     # only needed if you enable the OpenRout
 
 ### Using the OpenRouter worker tiers (GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder)
 
-Off by default — a task has to opt in with `allow_openrouter=True` on its
-`OrchestratorConfig` (or by having its planner call pass `allow_openrouter=True`
-directly), because open-weight models are meaningfully less consistent at
-structured output than Anthropic's `output_config.format`. That's a real
-trade, not a bug: `ringer/_openrouter_client.py` never raises on a
-malformed reply — it hands the raw text to the mechanical checker, which
-rejects it like any other bad output, and the harness's own retry loop
-(with the parse error appended as failure context, docs §5) gets another
-attempt. In practice this means the cheapest tier costs you a few extra
-retries on the units it can't produce clean structured output for, not a
-crashed run — and the checker is exactly what makes that an acceptable
-trade rather than a silent quality regression.
+**Two things have to both be true, not just one.** A task has to opt in with
+`allow_openrouter=True` on its `OrchestratorConfig` *and* `OPENROUTER_API_KEY`
+has to actually be set in the environment. `orchestrator.run()` checks both
+before the planner is ever invoked — if the key isn't set, the planner is
+never even told OpenRouter tiers exist, regardless of what the task
+requested; `ringer run` / `ringer intake` print a one-line note when this
+happens, and the run proceeds Anthropic-only rather than failing.
+
+**This makes "Anthropic-only for daily use" a property of the environment,
+not a discipline every task has to remember.** If you have an enterprise
+Anthropic account but no equivalent OpenRouter arrangement, just don't set
+`OPENROUTER_API_KEY` in that environment — every task runs Anthropic-only,
+including ones (like the example below) that explicitly request OpenRouter.
+No separate "disable OpenRouter" flag to remember; the credential itself is
+the switch. `examples/extract_invoices/task.py`'s `build_task_openrouter()`
+keeps working exactly as documented in any environment that *does* have the
+key configured, so it stays useful as a reference for the OpenRouter
+economics story without needing special-casing.
+
+Why gate it at all, beyond cost: open-weight models are meaningfully less
+consistent at structured output than Anthropic's `output_config.format`.
+That's a real trade, not a bug: `ringer/_openrouter_client.py` never raises
+on a malformed reply — it hands the raw text to the mechanical checker,
+which rejects it like any other bad output, and the harness's own retry
+loop (with the parse error appended as failure context, docs §5) gets
+another attempt. In practice this means the cheapest tier costs you a few
+extra retries on the units it can't produce clean structured output for,
+not a crashed run — and the checker is exactly what makes that an
+acceptable trade rather than a silent quality regression.
 
 When `allow_openrouter=True`, the *planner* decides per unit whether it's
 routine and low-stakes enough to route off Sonnet/Haiku, and which

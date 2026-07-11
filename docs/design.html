@@ -624,6 +624,10 @@
         </table>
       </div>
       <p>Workers and the judge are never the same model instance or even the same conversation — no shared context, no shared cache, no way for the judge to have absorbed the worker's framing. That separation is enforced structurally in <code>ringer/orchestrator.py</code>, not by convention. The judge itself never routes to OpenRouter, regardless of which tier a worker used — the fresh-eyes review has to be at least as reliable as the thing it's grading.</p>
+
+      <h3>Two locks on the OpenRouter tiers, not one</h3>
+      <p>"Opt-in" above means a task's <code>allow_openrouter</code> flag — but that's necessary, not sufficient. <code>orchestrator.run()</code> only honors it when <code>OPENROUTER_API_KEY</code> is actually set in the environment; otherwise the planner is never even told the OpenRouter tiers exist, regardless of what the task requested. A second check inside the worker's own tier resolution does the same thing as a fallback, in case a stale or hand-built spec somehow still carries an OpenRouter tier.</p>
+      <p>The practical effect: an environment that simply never provisions an OpenRouter key — an enterprise deployment standardized on Anthropic, say, with no equivalent enterprise arrangement for a third-party aggregator — is Anthropic-only <i>by construction</i>, not by every task author remembering not to opt in. The reference example (<code>build_task_openrouter()</code>) keeps demonstrating the economics story in environments that do have a key configured; everywhere else, it silently degrades to Anthropic workers with a one-line note, never a failed run.</p>
     </section>
 
     <section id="no">

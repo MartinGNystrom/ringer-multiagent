@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import _openrouter_client
 from . import cost_estimate
 from . import intake as intake_mod
 from .orchestrator import AgentTestGateError, IntakeCostRecord, OrchestratorConfig, run
@@ -41,9 +42,18 @@ def _print_gate_refusal(exc: AgentTestGateError) -> None:
     print("not running -- pass force=True on the OrchestratorConfig (or --force on `ringer intake`) to override.")
 
 
+def _note_if_openrouter_unreachable(config: OrchestratorConfig) -> None:
+    if config.allow_openrouter and not _openrouter_client.is_configured():
+        print(
+            "note: this task requested OpenRouter worker tiers (allow_openrouter=True), but "
+            "OPENROUTER_API_KEY is not set -- running Anthropic-only instead."
+        )
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     factory = _load_callable(args.target)
     config: OrchestratorConfig = factory()
+    _note_if_openrouter_unreachable(config)
     try:
         report = asyncio.run(run(config))
     except AgentTestGateError as exc:
@@ -109,8 +119,10 @@ def _print_cost_estimate(estimate: cost_estimate.ExecutionCostEstimate, allow_op
     print(f"  workers, worst case:     ${estimate.worker_cost_worst_case:.4f}  (if every unit uses every retry)")
     print(f"  judge, if all escalate:  ${estimate.judge_cost_if_all_escalate:.4f}  ({estimate.judge_model})")
     print(f"  likely range:            ${estimate.low_estimate:.4f} - ${estimate.high_estimate:.4f}")
-    if allow_openrouter:
+    if allow_openrouter and _openrouter_client.is_configured():
         print("  (--allow-openrouter is set: actual worker cost may be lower if the planner routes some units there)")
+    elif allow_openrouter:
+        print("  (--allow-openrouter is set, but OPENROUTER_API_KEY is missing -- this estimate is Anthropic-only)")
     print()
 
 
@@ -149,6 +161,7 @@ def _cmd_intake(args: argparse.Namespace) -> None:
             model=plan.model, input_tokens=plan.input_tokens, output_tokens=plan.output_tokens, cost=plan.cost
         ),
     )
+    _note_if_openrouter_unreachable(config)
     try:
         report = asyncio.run(run(config))
     except AgentTestGateError as exc:
