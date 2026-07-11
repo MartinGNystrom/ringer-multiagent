@@ -387,8 +387,8 @@
     <p class="subtitle">A planner–workers–evals harness built on Nate Jones' Ringer pattern: one expensive model plans and grades, many cheap models do the work, and nothing is trusted without a mechanical check.</p>
     <div class="byline">
       <span><b>Planner / Judge</b> Claude Fable 5, Opus 4.8</span>
-      <span><b>Workers</b> Sonnet 5, Haiku 4.5</span>
-      <span><b>Status</b> Design v1</span>
+      <span><b>Workers</b> Sonnet 5, Haiku 4.5, GLM 5.2, Kimi K2 (OpenRouter)</span>
+      <span><b>Status</b> Design v1.1</span>
     </div>
   </header>
 
@@ -519,11 +519,14 @@
             <tr><td><code>claude-opus-4-8</code></td><td>Default planner / default judge</td><td class="num">$5.00</td><td class="num">$25.00</td></tr>
             <tr><td><code>claude-sonnet-5</code></td><td>Default worker</td><td class="num">$2.00*</td><td class="num">$10.00*</td></tr>
             <tr><td><code>claude-haiku-4-5</code></td><td>High-volume / mechanical-only worker</td><td class="num">$1.00</td><td class="num">$5.00</td></tr>
+            <tr><td><code>z-ai/glm-5.2</code></td><td>OpenRouter worker — open-weight, opt-in</td><td class="num">$0.35</td><td class="num">$1.10</td></tr>
+            <tr><td><code>moonshotai/kimi-k2.7-code</code></td><td>OpenRouter worker — open-weight, opt-in</td><td class="num">$0.72</td><td class="num">$3.50</td></tr>
           </tbody>
         </table>
       </div>
-      <p style="font-size: 12.5px; color: var(--ink-soft); margin-top: -14px;">* introductory Sonnet 5 pricing through 2026-08-31; standard rate is $3.00 / $15.00.</p>
+      <p style="font-size: 12.5px; color: var(--ink-soft); margin-top: -14px;">* introductory Sonnet 5 pricing through 2026-08-31; standard rate is $3.00 / $15.00. GLM/Kimi pricing pulled live from OpenRouter's own model catalog — re-check before relying on it long-term, that market moves fast.</p>
       <p>Because planning and judging happen once per task (or once per batch) while worker calls happen once per unit of work, the harness naturally spends its expensive tokens on the smallest number of calls and its cheap tokens on the largest. A 40-document audit might make one Opus planning call, two hundred Sonnet worker calls, and a double-digit number of Opus judge calls on the outputs the mechanical checker couldn't resolve on its own — see §6 for the full assignment logic.</p>
+      <p>The OpenRouter tiers push the "spend tokens deliberately" logic one step further: a GLM/Kimi worker costs roughly a fifth to a third of Sonnet per token, at the price of noticeably less reliable structured output. That's only a good trade because the mechanical checker (§5) is already there to catch what it gets wrong — without it, routing the cheapest, least-supervised tier at your workers would be exactly the failure mode Stanford's research warns about: more attempts, no way to pick the right one out of the pile.</p>
     </section>
 
     <section id="roles">
@@ -568,7 +571,8 @@
         <div class="fanout">
           <div class="stage"><div class="role">Sonnet 5</div><div class="name">Worker A</div></div>
           <div class="stage"><div class="role">Haiku 4.5</div><div class="name">Worker B</div></div>
-          <div class="stage"><div class="role">Sonnet 5</div><div class="name">Worker N…</div></div>
+          <div class="stage"><div class="role">GLM 5.2 · OpenRouter</div><div class="name">Worker C</div></div>
+          <div class="stage"><div class="role">Kimi K2 · OpenRouter</div><div class="name">Worker N…</div></div>
         </div>
         <div class="arrow">→</div>
         <div class="stage">
@@ -589,7 +593,7 @@
           <div class="detail">Cost, pass rate, retries, per-unit status, recommendations.</div>
         </div>
       </div>
-      <p class="diagram-caption">Failures at either the checker or the judge loop back to a fresh worker call with the failure reason appended to the spec — never a bare retry of the same prompt.</p>
+      <p class="diagram-caption">Failures at either the checker or the judge loop back to a fresh worker call with the failure reason appended to the spec — never a bare retry of the same prompt. The OpenRouter worker tiers are opt-in per task; when enabled, the planner (not the task author) decides per unit whether it's routine and low-stakes enough to route there, and is told explicitly to avoid them for anything also flagged for judge review.</p>
 
       <h3>Retry semantics</h3>
       <p>A failed unit doesn't just re-run — it re-runs with the specific failure appended to its spec ("source citation missing for claim 3" / "schema validation failed: expected ISO date, got 'March 2024'"). This is the mechanism that turns Stanford's "more attempts" curve into something that actually converges: each retry is strictly better-informed than the last, not a fresh roll of the dice. Units are capped at a configurable retry ceiling (default 3) before they're marked <span class="pill no">needs-human</span> and surfaced on the scorecard rather than silently dropped or silently accepted.</p>
@@ -608,13 +612,14 @@
             <tr><td>Routine planning — decomposing a well-understood pile</td><td><code>claude-opus-4-8</code></td><td>Strong enough to write correct specs; far cheaper than Fable per token.</td></tr>
             <tr><td>Planning a genuinely novel or ambiguous task shape</td><td><code>claude-fable-5</code></td><td>Long-horizon reasoning and ambiguity-handling justify the premium — spent once, not per unit.</td></tr>
             <tr><td>Default worker — extraction, drafting, coding, summarizing</td><td><code>claude-sonnet-5</code></td><td>Near-Opus quality on agentic/coding work at a fraction of the cost; this is where token volume lives.</td></tr>
-            <tr><td>High-volume, low-complexity worker — classification, simple lookups</td><td><code>claude-haiku-4-5</code></td><td>Cheapest tier; used when the spec is narrow enough that Haiku's ceiling doesn't matter.</td></tr>
+            <tr><td>High-volume, low-complexity worker — classification, simple lookups</td><td><code>claude-haiku-4-5</code></td><td>Cheapest Anthropic tier; used when the spec is narrow enough that Haiku's ceiling doesn't matter.</td></tr>
+            <tr><td>Cheapest worker, opt-in — highest-volume, lowest-stakes units only</td><td><code>z-ai/glm-5.2</code> / <code>moonshotai/kimi-k2.7-code</code></td><td>Roughly a fifth to a third of Sonnet per token; the mechanical checker is what makes the reliability trade acceptable — see §5.</td></tr>
             <tr><td>Default judge — most checker-escalated review</td><td><code>claude-opus-4-8</code></td><td>Independent of the worker tier; good judgment at a cost the retry volume can sustain.</td></tr>
             <tr><td>High-stakes judge — compliance, legal, financial sign-off units</td><td><code>claude-fable-5</code></td><td>Escalate only the subset of units flagged as high-value by the task's own economics (§3).</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Workers and the judge are never the same model instance or even the same conversation — no shared context, no shared cache, no way for the judge to have absorbed the worker's framing. That separation is enforced structurally in <code>ringer/orchestrator.py</code>, not by convention.</p>
+      <p>Workers and the judge are never the same model instance or even the same conversation — no shared context, no shared cache, no way for the judge to have absorbed the worker's framing. That separation is enforced structurally in <code>ringer/orchestrator.py</code>, not by convention. The judge itself never routes to OpenRouter, regardless of which tier a worker used — the fresh-eyes review has to be at least as reliable as the thing it's grading.</p>
     </section>
 
     <section id="no">
@@ -644,17 +649,19 @@
       <div class="kicker"><span class="num">§8</span><h2>Implementation</h2></div>
       <p>The harness ships as a small, pluggable Python package — <code>ringer/</code> — with no workload baked in. You supply a worker prompt/spec shape and a checker function; the package supplies the planner call, the parallel worker pool, the retry loop, the judge escalation, and the cost/pass-rate scorecard.</p>
       <pre><code>ringer/
-  agent_test.py    # §1 — the four-question + economics scorer (same logic as the calculator above)
-  models.py        # model IDs, pricing table, role → model resolution (§6)
-  planner.py       # Fable/Opus planning call → list of TaskSpec
-  worker.py        # Sonnet/Haiku worker pool, async, spec in → WorkResult out
-  checker.py       # pluggable deterministic Checker protocol + example checkers
-  judge.py         # Opus/Fable judge call, fresh-context, checker-escalated only
-  orchestrator.py  # wires planner → workers → checker → judge → retry → scorecard
-  scorecard.py     # SQLite-backed run ledger + CLI report
-  cli.py           # `ringer run task.yaml`
+  agent_test.py       # §1 — the four-question + economics scorer (same logic as the calculator above)
+  models.py           # model IDs, pricing, providers, role → model resolution (§6)
+  _client.py          # Anthropic call plumbing (planner/judge, and default/thrift workers)
+  _openrouter_client.py  # OpenRouter call plumbing — open-weight worker tiers, opt-in
+  planner.py          # Fable/Opus planning call → list of TaskSpec
+  worker.py           # dispatches each spec to Anthropic or OpenRouter, spec in → WorkResult out
+  checker.py          # pluggable deterministic Checker protocol + example checkers
+  judge.py            # Opus/Fable judge call, fresh-context, checker-escalated only, Anthropic only
+  orchestrator.py     # wires planner → workers → checker → judge → retry → scorecard
+  scorecard.py        # SQLite-backed run ledger + CLI report
+  cli.py              # `ringer run task.yaml`
 examples/
-  extract_invoices/  # a worked "pile of documents" example end to end</code></pre>
+  extract_invoices/  # a worked "pile of documents" example end to end, with an OpenRouter variant</code></pre>
       <p>See the repository README for setup and a runnable example. The scorecard is queryable mid-run — cost-to-date, pass rate by unit type, and units currently stuck in retry are all live numbers, not a post-hoc report.</p>
     </section>
 
