@@ -87,6 +87,7 @@ def main():
             allow_openrouter=False,
             force=False,
             yes=True,  # skip interactive input()
+            max_retries=3,
             scorecard=str(Path(tmp) / "intake_scorecard.sqlite3"),
         )
 

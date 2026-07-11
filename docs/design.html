@@ -663,6 +663,7 @@
   judge.py            # Opus/Fable judge call, fresh-context, checker-escalated only, Anthropic only
   orchestrator.py     # wires planner → workers → checker → judge → retry → scorecard; gates on the agent test
   intake.py           # §9 — prompt + raw units → agent-test estimate, proposed schema, checker (menu only)
+  cost_estimate.py    # §9 — rough pre-execution cost forecast, shown before you confirm
   scorecard.py        # SQLite-backed run ledger + CLI report
   cli.py              # `ringer run <factory>` / `ringer intake "<prompt>" --units <dir>`
 examples/
@@ -690,7 +691,7 @@ examples/
         <div class="stage">
           <div class="role">You, again</div>
           <div class="name">Confirm</div>
-          <div class="detail">Reads the verdict, schema, checks, and intake cost. y/n before any execution tokens are spent.</div>
+          <div class="detail">Reads the verdict, schema, checks, intake cost, and an estimated execution cost range. y/n before any execution tokens are spent.</div>
         </div>
         <div class="arrow">→</div>
         <div class="stage">
@@ -703,6 +704,10 @@ examples/
       <p>Two things this stage deliberately does <i>not</i> do. First, it never writes checker code. The whole harness's trust model depends on the checker being mechanical and inspectable — letting a model author the gate meant to catch that same model's mistakes would remove the one thing standing between "cheap worker" and "cheap worker nobody is checking" (§2). So intake only ever composes from a small, fixed library of deterministic factories in <code>checker.py</code> — schema validation, numeric reconciliation, verbatim-quote verification. If a task needs a check that isn't in the menu, intake says so in its rationale and falls back to schema-only validation, visible to you before you confirm, rather than inventing something to fill the gap.</p>
 
       <p>Second, it never executes anything on your say-so alone twice. The agent test it estimates (§1) is the same <code>OrchestratorConfig.agent_test</code> gate every task can opt into: if the shape doesn't clear the bar for multi-agent — small, entangled, no way to check it — <code>ringer intake</code> refuses before the confirmation prompt even appears, the same way <code>ringer run</code> refuses for a hand-written task with a poor agent-test score. <code>--force</code> overrides either.</p>
+
+      <h3>Cost accounting: what's estimated, what's actual</h3>
+      <p>Two different numbers appear before you confirm, and it matters which is which. The <b>intake cost</b> is real — it's what the proposal call itself already spent, computed from its actual token usage the same way every other stage is. The <b>execution cost range</b> below it is a rough forecast, not a promise: <code>ringer/cost_estimate.py</code> converts each unit's character count to an approximate token count (no <code>count_tokens</code> round trip, no model call) and reports a low estimate (planner + one clean pass per unit) alongside a genuine worst case (every unit exhausts its retry budget <i>and</i> escalates to the judge). Actual cost for a well-checked task usually lands far closer to the low end; a wide gap between the two numbers is itself a signal that retries or judge calls, if they happen, are expensive relative to a single pass.</p>
+      <p>Once you confirm, every number the scorecard reports is actual, not estimated — including the intake call and the once-per-run planner call, both of which are now recorded into the same run's ledger as the workers and judge, so <code>ringer report</code> reflects the full cost of the episode from prompt to finished output, not just the execution slice of it.</p>
     </section>
 
     <footer>

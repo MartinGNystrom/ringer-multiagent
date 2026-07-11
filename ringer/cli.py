@@ -17,8 +17,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import cost_estimate
 from . import intake as intake_mod
-from .orchestrator import AgentTestGateError, OrchestratorConfig, run
+from .orchestrator import AgentTestGateError, IntakeCostRecord, OrchestratorConfig, run
 from .scorecard import Scorecard
 
 
@@ -98,12 +99,30 @@ def _print_intake_plan(plan: intake_mod.IntakePlan, unit_count: int) -> None:
     print()
 
 
+def _print_cost_estimate(estimate: cost_estimate.ExecutionCostEstimate, allow_openrouter: bool) -> None:
+    print("estimated execution cost (rough -- based on unit size, not actual usage):")
+    print(f"  planner:                 ${estimate.planner_cost:.4f}  ({estimate.planner_model})")
+    print(
+        f"  workers, single pass:    ${estimate.worker_cost_single_pass:.4f}  "
+        f"({estimate.worker_model}, {estimate.unit_count} units)"
+    )
+    print(f"  workers, worst case:     ${estimate.worker_cost_worst_case:.4f}  (if every unit uses every retry)")
+    print(f"  judge, if all escalate:  ${estimate.judge_cost_if_all_escalate:.4f}  ({estimate.judge_model})")
+    print(f"  likely range:            ${estimate.low_estimate:.4f} - ${estimate.high_estimate:.4f}")
+    if allow_openrouter:
+        print("  (--allow-openrouter is set: actual worker cost may be lower if the planner routes some units there)")
+    print()
+
+
 def _cmd_intake(args: argparse.Namespace) -> None:
     units = _load_units(args.units)
     unit_previews = [{"unit_id": uid, "preview": str(content)[:200]} for uid, content in units.items()]
 
     plan = asyncio.run(intake_mod.propose(args.prompt, units))
     _print_intake_plan(plan, len(units))
+
+    estimate = cost_estimate.estimate_execution_cost(units, max_retries=args.max_retries)
+    _print_cost_estimate(estimate, args.allow_openrouter)
 
     if not plan.agent_test_result.should_build_multi_agent and not args.force:
         print("not proceeding -- pass --force to run anyway despite the recommendation above.")
@@ -124,7 +143,11 @@ def _cmd_intake(args: argparse.Namespace) -> None:
         allow_openrouter=args.allow_openrouter,
         agent_test=plan.agent_test_inputs,
         force=args.force,
+        max_retries=args.max_retries,
         scorecard_path=args.scorecard,
+        intake_cost=IntakeCostRecord(
+            model=plan.model, input_tokens=plan.input_tokens, output_tokens=plan.output_tokens, cost=plan.cost
+        ),
     )
     try:
         report = asyncio.run(run(config))
@@ -168,6 +191,9 @@ def main(argv: list[str] | None = None) -> None:
         "--force", action="store_true", help="run even if the agent test doesn't recommend multi-agent"
     )
     intake_parser.add_argument("--yes", action="store_true", help="skip the interactive y/n confirmation")
+    intake_parser.add_argument(
+        "--max-retries", type=int, default=3, help="retry ceiling per unit (also used for the cost estimate)"
+    )
     intake_parser.add_argument("--scorecard", default="ringer_intake_scorecard.sqlite3")
     intake_parser.set_defaults(func=_cmd_intake)
 

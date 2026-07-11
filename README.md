@@ -123,6 +123,13 @@ checks:
 proposed output schema: {...}
 intake call cost: $0.0091 (claude-opus-4-8, 1840 in / 210 out)
 
+estimated execution cost (rough -- based on unit size, not actual usage):
+  planner:                 $0.0141  (claude-opus-4-8)
+  workers, single pass:    $0.0281  (claude-sonnet-5, 12 units)
+  workers, worst case:     $0.1124  (if every unit uses every retry)
+  judge, if all escalate:  $0.0691  (claude-opus-4-8)
+  likely range:            $0.0422 - $0.1956
+
 Proceed with this plan? [y/N]:
 ```
 
@@ -132,7 +139,21 @@ scorecard pipeline as `ringer run` — `ringer intake` only replaces how the
 directory (each file becomes one unit) or a `.json` file of
 `{"unit_id": "content", ...}`. `--allow-openrouter` and `--force` mirror
 the flags of the same name elsewhere; `--yes` skips the interactive
-confirmation for scripting.
+confirmation for scripting; `--max-retries` sets the per-unit retry
+ceiling used both for execution and for the cost estimate above it.
+
+**The intake cost is real; the execution range is a forecast.** The
+`intake call cost` line is computed from the proposal call's actual token
+usage, same as everything else the scorecard reports. The `estimated
+execution cost` block is a rough heuristic instead (`ringer/cost_estimate.py`
+-- character count → approximate tokens, no `count_tokens` round trip, no
+model call), reported as a low estimate (planner + one clean pass per unit)
+and a genuine worst case (every unit exhausts its retries *and* escalates
+to the judge). Real cost for a well-checked task usually lands much closer
+to the low end. Once you confirm, both the intake call and the once-per-run
+planner call are persisted into the same run's scorecard entry alongside
+workers and judge, so `ringer report` reflects the whole episode's cost,
+not just execution.
 
 **What intake will never do: write your checker for you.** The checker is
 the one thing in this design that's supposed to be mechanical and
@@ -228,7 +249,8 @@ ringer/
   judge.py                  fresh-eyes review, rationed to checker-flagged units (§4/§5)
   orchestrator.py           wires it all together + retry-with-failure-context + the agent-test gate (§5)
   intake.py                 prompt + raw units → agent-test estimate, proposed schema, checker (menu only)
-  scorecard.py               SQLite-backed cost/pass-rate ledger (§5)
+  cost_estimate.py           rough pre-execution cost forecast, shown before you confirm an intake plan
+  scorecard.py               SQLite-backed cost/pass-rate ledger -- now tracks intake + planner cost, not just workers/judge
   cli.py                     `ringer run` / `ringer intake` / `ringer report`
 examples/extract_invoices/  a worked pile-of-documents task, end to end
 scripts/dry_run_check.py         offline wiring check for `ringer run` (mocks the model calls)

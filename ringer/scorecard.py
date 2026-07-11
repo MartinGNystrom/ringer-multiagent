@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     run_id TEXT,
     unit_id TEXT,
     attempt_number INTEGER,
-    stage TEXT,          -- 'worker' | 'checker' | 'judge'
+    stage TEXT,          -- 'intake' | 'planner' | 'worker' | 'checker' | 'judge'
     model TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
@@ -69,6 +69,34 @@ class Scorecard:
 
     def finish_run(self, run_id: str) -> None:
         self._conn.execute("UPDATE runs SET finished_at = ? WHERE run_id = ?", (time.time(), run_id))
+        self._conn.commit()
+
+    def record_intake_cost(self, run_id: str, *, model: str, input_tokens: int, output_tokens: int, cost: float) -> None:
+        """Record the upfront `ringer intake` proposal call against this run.
+
+        Uses a sentinel unit_id ('__intake__') rather than a new table --
+        the intake call isn't tied to any one unit, but it's still a real
+        call worth including in the run's total_cost so `ringer report`
+        reflects the whole prompt -> execution episode, not just execution.
+        Never appears in status_counts()/pass-rate since it never touches
+        the `units` table.
+        """
+        self._conn.execute(
+            "INSERT INTO attempts VALUES (?, '__intake__', 0, 'intake', ?, ?, ?, ?, NULL, NULL, ?)",
+            (run_id, model, input_tokens, output_tokens, cost, time.time()),
+        )
+        self._conn.commit()
+
+    def record_planner_cost(self, run_id: str, *, model: str, input_tokens: int, output_tokens: int, cost: float) -> None:
+        """Record the once-per-run planning call. Same sentinel-unit_id
+        pattern as record_intake_cost -- this call was previously computed
+        (planner.PlanResult.cost) but never persisted anywhere, so every
+        run's reported total silently excluded it.
+        """
+        self._conn.execute(
+            "INSERT INTO attempts VALUES (?, '__planner__', 0, 'planner', ?, ?, ?, ?, NULL, NULL, ?)",
+            (run_id, model, input_tokens, output_tokens, cost, time.time()),
+        )
         self._conn.commit()
 
     def record_worker_attempt(self, run_id: str, attempt: Attempt) -> None:

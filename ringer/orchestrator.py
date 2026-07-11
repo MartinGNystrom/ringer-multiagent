@@ -20,8 +20,22 @@ from .agent_test import AgentTestInputs, AgentTestResult
 from .agent_test import score as score_agent_test
 from .checker import Checker
 from .models import Tier
-from .scorecard import Scorecard
+from .scorecard import CostSummary, Scorecard
 from .spec import Attempt, TaskSpec, UnitResult, UnitStatus
+
+
+@dataclass
+class IntakeCostRecord:
+    """The cost of an upstream `ringer intake` proposal call, passed through
+    so run() can persist it into the scorecard alongside execution costs --
+    see intake.py / cli.py `ringer intake`. None if a task was hand-written
+    via `ringer run` with no intake step.
+    """
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
 
 
 class AgentTestGateError(RuntimeError):
@@ -45,10 +59,15 @@ class AgentTestGateError(RuntimeError):
 class RunReport:
     run_id: str
     units: list[UnitResult]
+    # Authoritative cost across every stage of this run -- intake (if any),
+    # planner, workers, and judge. Pulled from the scorecard itself rather
+    # than summed from `units`, which only ever covered worker+judge cost
+    # and silently excluded the once-per-run planner call.
+    cost_summary: CostSummary
 
     @property
     def total_cost(self) -> float:
-        return sum(u.total_cost for u in self.units)
+        return self.cost_summary.total_cost
 
     @property
     def pass_rate(self) -> float:
@@ -84,6 +103,10 @@ class OrchestratorConfig:
     # None (the default) skips the gate entirely, matching prior behavior.
     agent_test: AgentTestInputs | None = None
     force: bool = False
+    # Set by `ringer intake` when this config was built from a prompt
+    # proposal, so its cost is persisted alongside execution -- see
+    # IntakeCostRecord above. None for a hand-written OrchestratorConfig.
+    intake_cost: IntakeCostRecord | None = None
 
 
 async def _run_unit(
@@ -185,12 +208,28 @@ async def run(config: OrchestratorConfig) -> RunReport:
     scorecard = Scorecard(config.scorecard_path)
     run_id = scorecard.start_run(config.task_description)
 
+    if config.intake_cost is not None:
+        scorecard.record_intake_cost(
+            run_id,
+            model=config.intake_cost.model,
+            input_tokens=config.intake_cost.input_tokens,
+            output_tokens=config.intake_cost.output_tokens,
+            cost=config.intake_cost.cost,
+        )
+
     plan_result = await planner_mod.plan(
         task_description=config.task_description,
         output_schema=config.output_schema,
         units=config.unit_previews,
         tier=config.planner_tier,
         allow_openrouter=config.allow_openrouter,
+    )
+    scorecard.record_planner_cost(
+        run_id,
+        model=plan_result.model,
+        input_tokens=plan_result.input_tokens,
+        output_tokens=plan_result.output_tokens,
+        cost=plan_result.cost,
     )
 
     for spec in plan_result.specs:
@@ -213,5 +252,6 @@ async def run(config: OrchestratorConfig) -> RunReport:
     )
 
     scorecard.finish_run(run_id)
+    cost_summary = scorecard.cost_summary(run_id)
     scorecard.close()
-    return RunReport(run_id=run_id, units=list(unit_results))
+    return RunReport(run_id=run_id, units=list(unit_results), cost_summary=cost_summary)
