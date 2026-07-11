@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
+
+EventCallback = Callable[[str], None]
 
 from . import _openrouter_client
 from . import judge as judge_mod
@@ -130,6 +132,7 @@ async def _run_unit(
     run_id: str,
     scorecard: Scorecard,
     semaphore: asyncio.Semaphore,
+    emit: EventCallback,
 ) -> UnitResult:
     attempts: list[Attempt] = []
 
@@ -157,6 +160,7 @@ async def _run_unit(
                 attempts.append(attempt)
                 scorecard.record_worker_attempt(run_id, attempt)
                 spec.failure_context.append(f"worker error: {exc}")
+                emit(f"[{spec.unit_id}] attempt {attempt_number}: worker error -- {exc}")
                 continue
 
             attempt = Attempt(
@@ -177,9 +181,11 @@ async def _run_unit(
                 attempts.append(attempt)
                 scorecard.record_worker_attempt(run_id, attempt)
                 spec.failure_context.append(f"checker: {check.reason}")
+                emit(f"[{spec.unit_id}] attempt {attempt_number}: checker rejected -- {check.reason}")
                 continue
 
             if check.needs_judge or spec.needs_judge:
+                emit(f"[{spec.unit_id}] attempt {attempt_number}: checker passed, escalating to judge")
                 verdict = await judge_mod.evaluate(spec, work.output, tier=judge_tier)
                 attempt.judge_passed = verdict.passed
                 attempt.judge_reason = verdict.reason
@@ -193,14 +199,17 @@ async def _run_unit(
 
                 if verdict.passed:
                     scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.PASSED)
+                    emit(f"[{spec.unit_id}] judge approved -- PASSED ({attempt_number} attempt(s))")
                     return UnitResult(spec.unit_id, UnitStatus.PASSED, attempts, work.output)
 
                 spec.failure_context.append(f"judge: {verdict.reason}")
+                emit(f"[{spec.unit_id}] attempt {attempt_number}: judge rejected -- {verdict.reason}")
                 continue
 
             attempts.append(attempt)
             scorecard.record_worker_attempt(run_id, attempt)
             scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.PASSED)
+            emit(f"[{spec.unit_id}] checker passed -- PASSED ({attempt_number} attempt(s))")
             return UnitResult(spec.unit_id, UnitStatus.PASSED, attempts, work.output)
 
     # Retries exhausted without a pass -- surfaced for a human, never silently
@@ -209,10 +218,21 @@ async def _run_unit(
     # same either way.
     last = attempts[-1] if attempts else None
     scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.NEEDS_HUMAN)
+    emit(f"[{spec.unit_id}] NEEDS HUMAN REVIEW after {len(attempts)} attempt(s) -- {last.checker_reason if last else 'no attempts recorded'}")
     return UnitResult(spec.unit_id, UnitStatus.NEEDS_HUMAN, attempts, last.output if last else None)
 
 
-async def run(config: OrchestratorConfig) -> RunReport:
+async def run(config: OrchestratorConfig, on_event: EventCallback | None = None) -> RunReport:
+    """Run a task end to end. `on_event` is an optional callback invoked with
+    a human-readable string as things happen (plan complete, each unit's
+    attempt result, each unit reaching a terminal state) -- pass it to get
+    live progress instead of silence until the whole run finishes. None (the
+    default) means no callback is invoked at all, matching prior behavior --
+    library callers that don't want console output don't have to opt out of
+    anything.
+    """
+    emit: EventCallback = on_event if on_event is not None else (lambda _msg: None)
+
     if config.agent_test is not None:
         result = score_agent_test(config.agent_test)
         if not result.should_build_multi_agent and not config.force:
@@ -220,6 +240,7 @@ async def run(config: OrchestratorConfig) -> RunReport:
 
     scorecard = Scorecard(config.scorecard_path)
     run_id = scorecard.start_run(config.task_description)
+    emit(f"run {run_id}: {len(config.units)} units, planning...")
 
     if config.intake_cost is not None:
         scorecard.record_intake_cost(
@@ -252,6 +273,7 @@ async def run(config: OrchestratorConfig) -> RunReport:
         output_tokens=plan_result.output_tokens,
         cost=plan_result.cost,
     )
+    emit(f"planned {len(plan_result.specs)} units via {plan_result.model} (${plan_result.cost:.4f}) -- starting workers")
 
     for spec in plan_result.specs:
         spec.input_data = config.units.get(spec.unit_id)
@@ -267,6 +289,7 @@ async def run(config: OrchestratorConfig) -> RunReport:
                 run_id,
                 scorecard,
                 semaphore,
+                emit,
             )
             for spec in plan_result.specs
         ]
@@ -275,6 +298,8 @@ async def run(config: OrchestratorConfig) -> RunReport:
     scorecard.finish_run(run_id)
     cost_summary = scorecard.cost_summary(run_id)
     scorecard.close()
+    passed = sum(1 for u in unit_results if u.status == UnitStatus.PASSED)
+    emit(f"run {run_id} complete: {passed}/{len(unit_results)} passed, ${cost_summary.total_cost:.4f} total")
     return RunReport(
         run_id=run_id,
         units=list(unit_results),

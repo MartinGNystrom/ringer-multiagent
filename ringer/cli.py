@@ -52,6 +52,10 @@ def _note_if_openrouter_unreachable(config: OrchestratorConfig) -> None:
         )
 
 
+def _live_event(msg: str) -> None:
+    print(msg, flush=True)
+
+
 def _ensure_anthropic_credentials() -> None:
     """Prompt for ANTHROPIC_API_KEY if nothing else is obviously configured.
 
@@ -86,8 +90,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
     factory = _load_callable(args.target)
     config: OrchestratorConfig = factory()
     _note_if_openrouter_unreachable(config)
+    on_event = None if args.quiet else _live_event
     try:
-        report = asyncio.run(run(config))
+        report = asyncio.run(run(config, on_event=on_event))
     except AgentTestGateError as exc:
         _print_gate_refusal(exc)
         sys.exit(2)
@@ -195,8 +200,9 @@ def _cmd_intake(args: argparse.Namespace) -> None:
         ),
     )
     _note_if_openrouter_unreachable(config)
+    on_event = None if args.quiet else _live_event
     try:
-        report = asyncio.run(run(config))
+        report = asyncio.run(run(config, on_event=on_event))
     except AgentTestGateError as exc:
         _print_gate_refusal(exc)
         sys.exit(2)
@@ -227,6 +233,9 @@ def main(argv: list[str] | None = None) -> None:
 
     run_parser = sub.add_parser("run", help="run a task defined by a Python factory function")
     run_parser.add_argument("target", help="dotted path, e.g. examples.extract_invoices.task:build_task")
+    run_parser.add_argument(
+        "--quiet", action="store_true", help="suppress live progress output; only print the final scorecard report"
+    )
     run_parser.set_defaults(func=_cmd_run)
 
     report_parser = sub.add_parser("report", help="print the scorecard for a past run")
@@ -252,6 +261,9 @@ def main(argv: list[str] | None = None) -> None:
         "--max-retries", type=int, default=3, help="retry ceiling per unit (also used for the cost estimate)"
     )
     intake_parser.add_argument("--scorecard", default="ringer_intake_scorecard.sqlite3")
+    intake_parser.add_argument(
+        "--quiet", action="store_true", help="suppress live progress output; only print the final scorecard report"
+    )
     intake_parser.set_defaults(func=_cmd_intake)
 
     args = parser.parse_args(argv)

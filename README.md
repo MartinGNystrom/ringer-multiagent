@@ -113,8 +113,25 @@ python -m ringer.cli run examples.extract_invoices.task:build_task_openrouter
 
 This runs the full pipeline (plan → workers in parallel → mechanical
 checker → judge escalation where flagged → retry with failure context →
-scorecard) and prints a cost/pass-rate report. Re-print that report later
-with:
+scorecard), printing progress live as it happens rather than going silent
+until the end:
+
+```
+run a1b2c3d4e5f6: 4 units, planning...
+planned 4 units via claude-opus-4-8 ($0.0141) -- starting workers
+[inv-002] checker passed -- PASSED (1 attempt(s))
+[inv-001] attempt 1: checker rejected -- line items sum to 545.5 but total_amount is 999.99
+[inv-004] checker passed -- PASSED (1 attempt(s))
+[inv-001] checker passed -- PASSED (2 attempt(s))
+[inv-003] checker passed -- PASSED (1 attempt(s))
+run a1b2c3d4e5f6 complete: 4/4 passed, $0.0234 total
+```
+
+Units run concurrently, so lines from different units interleave — each
+is prefixed with its `unit_id` so it stays legible. Pass `--quiet` to
+suppress this and only see the final scorecard report (useful when
+piping output somewhere that doesn't want a stream of progress lines).
+Re-print a past run's report with:
 
 ```bash
 python -m ringer.cli report extract_invoices_scorecard.sqlite3 <run_id>
@@ -167,7 +184,9 @@ directory (each file becomes one unit) or a `.json` file of
 `{"unit_id": "content", ...}`. `--allow-openrouter` and `--force` mirror
 the flags of the same name elsewhere; `--yes` skips the interactive
 confirmation for scripting; `--max-retries` sets the per-unit retry
-ceiling used both for execution and for the cost estimate above it.
+ceiling used both for execution and for the cost estimate above it;
+`--quiet` suppresses the live per-unit progress output during execution
+(the proposal, cost estimate, and confirmation prompt still print either way).
 
 **The intake cost is real; the execution range is a forecast.** The
 `intake call cost` line is computed from the proposal call's actual token
@@ -237,6 +256,12 @@ def build_task() -> OrchestratorConfig:
 ```
 
 Then: `python -m ringer.cli run mymodule:build_task`.
+
+Using `orchestrator.run()` directly instead of the CLI? Pass an
+`on_event: Callable[[str], None]` callback to get the same live progress
+strings the CLI prints (`run(config, on_event=print)`, or wire it into
+your own logger) — it's `None` by default, so nothing changes for existing
+callers who don't pass one.
 
 ## Before building a task at all
 
