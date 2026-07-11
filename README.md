@@ -34,6 +34,16 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or `ant auth login` — see the claude
 export OPENROUTER_API_KEY=sk-or-...     # only needed if you enable the OpenRouter worker tiers
 ```
 
+Forgot the export? `ringer run` / `ringer intake` will prompt for
+`ANTHROPIC_API_KEY` (hidden input, only in an interactive terminal, never
+written to disk — used for that process only) if neither it nor
+`ANTHROPIC_AUTH_TOKEN` is already set. Already authenticated some other way
+(`ant auth login`, WIF)? Just press Enter at the prompt and the SDK
+resolves credentials as normal. `ringer report` never prompts — it only
+reads the local scorecard file, no API calls involved. This never applies
+to `OPENROUTER_API_KEY`: its absence is a deliberate signal (see below),
+not a missing setup step, so it's never prompted for.
+
 ### Using the OpenRouter worker tiers (GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder)
 
 **Two things have to both be true, not just one.** A task has to opt in with
