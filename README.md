@@ -21,7 +21,7 @@ served through [OpenRouter](https://openrouter.ai).
 | Role | Default | Escalated / cheaper tiers |
 |---|---|---|
 | Planner | `claude-opus-4-8` | `claude-fable-5` for genuinely novel task shapes |
-| Worker | `claude-sonnet-5` | `claude-haiku-4-5` (thrift) · `z-ai/glm-5.2` / `moonshotai/kimi-k2.7-code` via OpenRouter (cheapest, opt-in) |
+| Worker | `claude-sonnet-5` | `claude-haiku-4-5` (thrift) · via OpenRouter (cheapest, opt-in): `z-ai/glm-5.2` / `deepseek/deepseek-v4-flash` (general-purpose), `moonshotai/kimi-k2.7-code` / `qwen/qwen3-coder` (coding) |
 | Judge | `claude-opus-4-8` | `claude-fable-5` for high-stakes (compliance/legal/financial) units |
 
 See `ringer/models.py` for the resolution table and current pricing.
@@ -34,7 +34,7 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or `ant auth login` — see the claude
 export OPENROUTER_API_KEY=sk-or-...     # only needed if you enable the OpenRouter worker tiers
 ```
 
-### Using the OpenRouter worker tiers (GLM 5.2, Kimi K2)
+### Using the OpenRouter worker tiers (GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder)
 
 Off by default — a task has to opt in with `allow_openrouter=True` on its
 `OrchestratorConfig` (or by having its planner call pass `allow_openrouter=True`
@@ -49,14 +49,24 @@ retries on the units it can't produce clean structured output for, not a
 crashed run — and the checker is exactly what makes that an acceptable
 trade rather than a silent quality regression.
 
-When `allow_openrouter=True`, the *planner* decides per unit whether a task
-is routine and low-stakes enough to route to `z-ai/glm-5.2` or
-`moonshotai/kimi-k2.7-code` instead of Sonnet/Haiku — it's told explicitly
-to avoid these tiers for anything also flagged `needs_judge`, since a
-judge escalation implies the checker alone can't confirm quality and the
-worker's reliability matters more there. See `examples/extract_invoices/task.py`
+When `allow_openrouter=True`, the *planner* decides per unit whether it's
+routine and low-stakes enough to route off Sonnet/Haiku, and which
+OpenRouter tier fits: `z-ai/glm-5.2` / `deepseek/deepseek-v4-flash` for
+general-purpose prose/extraction units, `moonshotai/kimi-k2.7-code` /
+`qwen/qwen3-coder` for coding-shaped units. It's told explicitly to avoid
+all four for anything also flagged `needs_judge`, since a judge escalation
+implies the checker alone can't confirm quality and the worker's
+reliability matters more there. See `examples/extract_invoices/task.py`
 → `build_task_openrouter()` for a runnable head-to-head: same task, same
 checker, only the worker backend differs.
+
+Planner/judge deliberately never route to OpenRouter, even though it's
+cheap — both are low-volume, high-consequence calls (one bad plan cascades
+to every unit; a judge grading its own provider's blind spots isn't fresh
+eyes), so the savings would be small while the downside of a less-proven
+model in that specific role wouldn't be. Workers are the high-volume side
+of the harness, protected by the checker + retry loop, which is why that's
+where the cost tier actually lives.
 
 ## Run the worked example
 
@@ -69,7 +79,8 @@ both checked mechanically, with no model call, before any output is trusted.
 python -m ringer.cli run examples.extract_invoices.task:build_task
 
 # same task, but the planner may route some invoices to OpenRouter
-# open-weight workers (GLM 5.2 / Kimi K2) instead of Sonnet/Haiku:
+# open-weight workers (GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder)
+# instead of Sonnet/Haiku:
 python -m ringer.cli run examples.extract_invoices.task:build_task_openrouter
 ```
 
@@ -145,7 +156,7 @@ ringer/
   agent_test.py            the four-question + economics scorer (§1)
   models.py                model IDs, pricing, providers, role → model resolution (§6)
   _client.py                shared Anthropic call plumbing (thinking/effort/fallback rules per model)
-  _openrouter_client.py      OpenRouter call plumbing for open-weight workers (GLM 5.2, Kimi K2)
+  _openrouter_client.py      OpenRouter call plumbing for open-weight workers (GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder)
   planner.py                plans once, never does the work (§4/§5)
   worker.py                 executes one TaskSpec against either backend, self-confidence ignored (§4/§5)
   checker.py                deterministic Checker protocol + example checkers (§4/§5)

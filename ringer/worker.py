@@ -5,9 +5,10 @@ spec's schema. Its own confidence is never read by anything downstream --
 the checker and judge decide, not the worker's tone.
 
 Workers can be resolved to either an Anthropic model or an OpenRouter
-open-weight model (GLM 5.2, Kimi K2) -- see models.py Tier.OPENROUTER_*.
-Both paths return the same WorkResult shape so the orchestrator and
-checker never need to know which provider actually ran.
+open-weight model (GLM 5.2, DeepSeek V4 Flash, Kimi K2.7 Code, Qwen3 Coder
+-- see models.py Tier.OPENROUTER_*). Both paths return the same WorkResult
+shape so the orchestrator and checker never need to know which provider
+actually ran.
 """
 
 from __future__ import annotations
@@ -31,6 +32,17 @@ just retry the same output."""
 
 _TIER_BY_SPEC_VALUE = {t.value: t for t in Tier}
 
+# A worker only ever gets one of these -- ESCALATED belongs to the planner
+# and judge, never a worker.
+_WORKER_TIERS = (
+    Tier.DEFAULT,
+    Tier.THRIFT,
+    Tier.OPENROUTER_GLM,
+    Tier.OPENROUTER_KIMI,
+    Tier.OPENROUTER_DEEPSEEK,
+    Tier.OPENROUTER_QWEN_CODER,
+)
+
 
 @dataclass
 class WorkResult:
@@ -46,10 +58,9 @@ def _resolve_worker_tier(spec_tier: str) -> Tier:
         tier = _TIER_BY_SPEC_VALUE[spec_tier]
     except KeyError:
         tier = Tier.DEFAULT
-    # A worker only ever gets DEFAULT/THRIFT/OPENROUTER_* -- ESCALATED belongs
-    # to the planner and judge. Fail safe to DEFAULT rather than error out on
-    # a planner that mistakenly emitted "escalated" for a unit.
-    if tier not in (Tier.DEFAULT, Tier.THRIFT, Tier.OPENROUTER_GLM, Tier.OPENROUTER_KIMI):
+    # Fail safe to DEFAULT rather than error out on a planner that
+    # mistakenly emitted "escalated" (or any other non-worker tier) for a unit.
+    if tier not in _WORKER_TIERS:
         tier = Tier.DEFAULT
     return tier
 

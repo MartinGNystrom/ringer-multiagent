@@ -387,7 +387,7 @@
     <p class="subtitle">A planner–workers–evals harness built on Nate Jones' Ringer pattern: one expensive model plans and grades, many cheap models do the work, and nothing is trusted without a mechanical check.</p>
     <div class="byline">
       <span><b>Planner / Judge</b> Claude Fable 5, Opus 4.8</span>
-      <span><b>Workers</b> Sonnet 5, Haiku 4.5, GLM 5.2, Kimi K2 (OpenRouter)</span>
+      <span><b>Workers</b> Sonnet 5, Haiku 4.5, GLM 5.2, DeepSeek V4 Flash, Kimi K2, Qwen3 Coder (OpenRouter)</span>
       <span><b>Status</b> Design v1.1</span>
     </div>
   </header>
@@ -519,14 +519,16 @@
             <tr><td><code>claude-opus-4-8</code></td><td>Default planner / default judge</td><td class="num">$5.00</td><td class="num">$25.00</td></tr>
             <tr><td><code>claude-sonnet-5</code></td><td>Default worker</td><td class="num">$2.00*</td><td class="num">$10.00*</td></tr>
             <tr><td><code>claude-haiku-4-5</code></td><td>High-volume / mechanical-only worker</td><td class="num">$1.00</td><td class="num">$5.00</td></tr>
-            <tr><td><code>z-ai/glm-5.2</code></td><td>OpenRouter worker — open-weight, opt-in</td><td class="num">$0.35</td><td class="num">$1.10</td></tr>
-            <tr><td><code>moonshotai/kimi-k2.7-code</code></td><td>OpenRouter worker — open-weight, opt-in</td><td class="num">$0.72</td><td class="num">$3.50</td></tr>
+            <tr><td><code>z-ai/glm-5.2</code></td><td>OpenRouter worker, general-purpose — open-weight, opt-in</td><td class="num">$0.35</td><td class="num">$1.10</td></tr>
+            <tr><td><code>deepseek/deepseek-v4-flash</code></td><td>OpenRouter worker, general-purpose — open-weight, opt-in</td><td class="num">$0.077</td><td class="num">$0.154</td></tr>
+            <tr><td><code>moonshotai/kimi-k2.7-code</code></td><td>OpenRouter worker, coding-specialized — open-weight, opt-in</td><td class="num">$0.72</td><td class="num">$3.50</td></tr>
+            <tr><td><code>qwen/qwen3-coder</code></td><td>OpenRouter worker, coding-specialized — open-weight, opt-in</td><td class="num">$0.22</td><td class="num">$1.80</td></tr>
           </tbody>
         </table>
       </div>
-      <p style="font-size: 12.5px; color: var(--ink-soft); margin-top: -14px;">* introductory Sonnet 5 pricing through 2026-08-31; standard rate is $3.00 / $15.00. GLM/Kimi pricing pulled live from OpenRouter's own model catalog — re-check before relying on it long-term, that market moves fast.</p>
+      <p style="font-size: 12.5px; color: var(--ink-soft); margin-top: -14px;">* introductory Sonnet 5 pricing through 2026-08-31; standard rate is $3.00 / $15.00. OpenRouter pricing pulled live from their own model catalog — re-check before relying on it long-term, that market moves fast.</p>
       <p>Because planning and judging happen once per task (or once per batch) while worker calls happen once per unit of work, the harness naturally spends its expensive tokens on the smallest number of calls and its cheap tokens on the largest. A 40-document audit might make one Opus planning call, two hundred Sonnet worker calls, and a double-digit number of Opus judge calls on the outputs the mechanical checker couldn't resolve on its own — see §6 for the full assignment logic.</p>
-      <p>The OpenRouter tiers push the "spend tokens deliberately" logic one step further: a GLM/Kimi worker costs roughly a fifth to a third of Sonnet per token, at the price of noticeably less reliable structured output. That's only a good trade because the mechanical checker (§5) is already there to catch what it gets wrong — without it, routing the cheapest, least-supervised tier at your workers would be exactly the failure mode Stanford's research warns about: more attempts, no way to pick the right one out of the pile.</p>
+      <p>The OpenRouter tiers push the "spend tokens deliberately" logic one step further: an open-weight worker runs anywhere from roughly a fifth (Qwen3 Coder) to well over an order of magnitude (DeepSeek V4 Flash) cheaper than Sonnet per token, at the price of noticeably less reliable structured output. That's only a good trade because the mechanical checker (§5) is already there to catch what it gets wrong — without it, routing the cheapest, least-supervised tier at your workers would be exactly the failure mode Stanford's research warns about: more attempts, no way to pick the right one out of the pile.</p>
     </section>
 
     <section id="roles">
@@ -571,8 +573,8 @@
         <div class="fanout">
           <div class="stage"><div class="role">Sonnet 5</div><div class="name">Worker A</div></div>
           <div class="stage"><div class="role">Haiku 4.5</div><div class="name">Worker B</div></div>
-          <div class="stage"><div class="role">GLM 5.2 · OpenRouter</div><div class="name">Worker C</div></div>
-          <div class="stage"><div class="role">Kimi K2 · OpenRouter</div><div class="name">Worker N…</div></div>
+          <div class="stage"><div class="role">GLM 5.2 / DeepSeek V4 · OpenRouter</div><div class="name">Worker C</div></div>
+          <div class="stage"><div class="role">Kimi K2 / Qwen3 Coder · OpenRouter</div><div class="name">Worker N…</div></div>
         </div>
         <div class="arrow">→</div>
         <div class="stage">
@@ -613,7 +615,8 @@
             <tr><td>Planning a genuinely novel or ambiguous task shape</td><td><code>claude-fable-5</code></td><td>Long-horizon reasoning and ambiguity-handling justify the premium — spent once, not per unit.</td></tr>
             <tr><td>Default worker — extraction, drafting, coding, summarizing</td><td><code>claude-sonnet-5</code></td><td>Near-Opus quality on agentic/coding work at a fraction of the cost; this is where token volume lives.</td></tr>
             <tr><td>High-volume, low-complexity worker — classification, simple lookups</td><td><code>claude-haiku-4-5</code></td><td>Cheapest Anthropic tier; used when the spec is narrow enough that Haiku's ceiling doesn't matter.</td></tr>
-            <tr><td>Cheapest worker, opt-in — highest-volume, lowest-stakes units only</td><td><code>z-ai/glm-5.2</code> / <code>moonshotai/kimi-k2.7-code</code></td><td>Roughly a fifth to a third of Sonnet per token; the mechanical checker is what makes the reliability trade acceptable — see §5.</td></tr>
+            <tr><td>Cheapest general-purpose worker, opt-in — highest-volume, lowest-stakes prose/extraction units</td><td><code>z-ai/glm-5.2</code> / <code>deepseek/deepseek-v4-flash</code></td><td>Well under Sonnet per token (DeepSeek V4 Flash by over an order of magnitude); the mechanical checker is what makes the reliability trade acceptable — see §5.</td></tr>
+            <tr><td>Cheapest coding worker, opt-in — highest-volume, lowest-stakes coding units</td><td><code>moonshotai/kimi-k2.7-code</code> / <code>qwen/qwen3-coder</code></td><td>Same trade as the general-purpose OpenRouter tiers, tuned for code rather than prose or extraction.</td></tr>
             <tr><td>Default judge — most checker-escalated review</td><td><code>claude-opus-4-8</code></td><td>Independent of the worker tier; good judgment at a cost the retry volume can sustain.</td></tr>
             <tr><td>High-stakes judge — compliance, legal, financial sign-off units</td><td><code>claude-fable-5</code></td><td>Escalate only the subset of units flagged as high-value by the task's own economics (§3).</td></tr>
           </tbody>

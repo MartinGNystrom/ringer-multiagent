@@ -36,18 +36,24 @@ _TIER_GUIDANCE_CLOSED = """\
 _TIER_GUIDANCE_OPEN = """\
 - "default": the everyday tier for this unit
 - "thrift": routine, low-complexity Anthropic-tier work
-- "openrouter_glm" / "openrouter_kimi": open-weight models routed through \
-  OpenRouter, cheaper still than "thrift" -- use these for the highest-volume, \
-  lowest-stakes units where cost matters most and the mechanical checker can \
-  catch a bad output on its own. Their structured-output reliability is lower \
-  than an Anthropic model's, so avoid them for units the checker can't fully \
-  verify (i.e. anything you'd also mark needs_judge)."""
+- "openrouter_glm" / "openrouter_deepseek": general-purpose open-weight \
+  models routed through OpenRouter, cheaper still than "thrift" -- use these \
+  for the highest-volume, lowest-stakes units where cost matters most and \
+  the mechanical checker can catch a bad output on its own
+- "openrouter_kimi" / "openrouter_qwen_coder": open-weight models tuned for \
+  code -- prefer these over the general-purpose OpenRouter tiers when the \
+  unit itself is a coding task (writing/reviewing code, not prose or \
+  extraction)
+
+All four OpenRouter tiers have lower structured-output reliability than an \
+Anthropic model, so avoid them for units the checker can't fully verify \
+(i.e. anything you'd also mark needs_judge)."""
 
 
 def _plan_schema(allow_openrouter: bool) -> dict:
     tiers = ["default", "thrift"]
     if allow_openrouter:
-        tiers += ["openrouter_glm", "openrouter_kimi"]
+        tiers += ["openrouter_glm", "openrouter_kimi", "openrouter_deepseek", "openrouter_qwen_coder"]
     return {
         "type": "object",
         "properties": {
@@ -98,10 +104,11 @@ async def plan(
     `input_data` afterward by unit_id; see orchestrator.py.
 
     `allow_openrouter` opts the planner into routing units to the
-    OpenRouter worker tiers (models.py Tier.OPENROUTER_GLM/_KIMI). It's off
-    by default -- a task author has to explicitly decide their units can
-    tolerate a less reliable, third-party structured-output path before the
-    planner is even allowed to reach for it.
+    OpenRouter worker tiers (models.py Tier.OPENROUTER_GLM/_KIMI/_DEEPSEEK/
+    _QWEN_CODER). It's off by default -- a task author has to explicitly
+    decide their units can tolerate a less reliable, third-party
+    structured-output path before the planner is even allowed to reach
+    for it.
     """
     model = resolve_model(Role.PLANNER, tier)
     tier_guidance = _TIER_GUIDANCE_OPEN if allow_openrouter else _TIER_GUIDANCE_CLOSED
