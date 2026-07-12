@@ -22,7 +22,7 @@ from . import worker as worker_mod
 from .agent_test import AgentTestInputs, AgentTestResult
 from .agent_test import score as score_agent_test
 from .checker import Checker
-from .models import Tier
+from .models import OPENROUTER_MODELS, Tier
 from .scorecard import CostSummary, Scorecard
 from .spec import Attempt, TaskSpec, UnitResult, UnitStatus
 
@@ -73,6 +73,11 @@ class RunReport:
     # it asked but the key wasn't configured -- callers that want to tell
     # those two apart should check config.allow_openrouter themselves.
     openrouter_available: bool = False
+    # Which OpenRouter models actually served a worker call this run --
+    # distinct from openrouter_available (which only means it *could* have
+    # been used). Empty if none were, whether because it wasn't available
+    # or the planner simply chose not to route anything there.
+    openrouter_models_used: list[str] = field(default_factory=list)
 
     @property
     def total_cost(self) -> float:
@@ -181,11 +186,11 @@ async def _run_unit(
                 attempts.append(attempt)
                 scorecard.record_worker_attempt(run_id, attempt)
                 spec.failure_context.append(f"checker: {check.reason}")
-                emit(f"[{spec.unit_id}] attempt {attempt_number}: checker rejected -- {check.reason}")
+                emit(f"[{spec.unit_id}] attempt {attempt_number} ({work.model}): checker rejected -- {check.reason}")
                 continue
 
             if check.needs_judge or spec.needs_judge:
-                emit(f"[{spec.unit_id}] attempt {attempt_number}: checker passed, escalating to judge")
+                emit(f"[{spec.unit_id}] attempt {attempt_number} ({work.model}): checker passed, escalating to judge")
                 verdict = await judge_mod.evaluate(spec, work.output, tier=judge_tier)
                 attempt.judge_passed = verdict.passed
                 attempt.judge_reason = verdict.reason
@@ -199,17 +204,20 @@ async def _run_unit(
 
                 if verdict.passed:
                     scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.PASSED)
-                    emit(f"[{spec.unit_id}] judge approved -- PASSED ({attempt_number} attempt(s))")
+                    emit(
+                        f"[{spec.unit_id}] judge ({verdict.model}) approved -- "
+                        f"PASSED ({attempt_number} attempt(s), worker: {work.model})"
+                    )
                     return UnitResult(spec.unit_id, UnitStatus.PASSED, attempts, work.output)
 
                 spec.failure_context.append(f"judge: {verdict.reason}")
-                emit(f"[{spec.unit_id}] attempt {attempt_number}: judge rejected -- {verdict.reason}")
+                emit(f"[{spec.unit_id}] attempt {attempt_number}: judge ({verdict.model}) rejected -- {verdict.reason}")
                 continue
 
             attempts.append(attempt)
             scorecard.record_worker_attempt(run_id, attempt)
             scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.PASSED)
-            emit(f"[{spec.unit_id}] checker passed -- PASSED ({attempt_number} attempt(s))")
+            emit(f"[{spec.unit_id}] checker passed -- PASSED ({attempt_number} attempt(s), {work.model})")
             return UnitResult(spec.unit_id, UnitStatus.PASSED, attempts, work.output)
 
     # Retries exhausted without a pass -- surfaced for a human, never silently
@@ -217,8 +225,12 @@ async def _run_unit(
     # judge, and why) is already in `attempts`; the terminal status is the
     # same either way.
     last = attempts[-1] if attempts else None
+    last_model = f", {last.model}" if last and last.model else ""
     scorecard.record_unit_status(run_id, spec.unit_id, UnitStatus.NEEDS_HUMAN)
-    emit(f"[{spec.unit_id}] NEEDS HUMAN REVIEW after {len(attempts)} attempt(s) -- {last.checker_reason if last else 'no attempts recorded'}")
+    emit(
+        f"[{spec.unit_id}] NEEDS HUMAN REVIEW after {len(attempts)} attempt(s){last_model} -- "
+        f"{last.checker_reason if last else 'no attempts recorded'}"
+    )
     return UnitResult(spec.unit_id, UnitStatus.NEEDS_HUMAN, attempts, last.output if last else None)
 
 
@@ -297,12 +309,17 @@ async def run(config: OrchestratorConfig, on_event: EventCallback | None = None)
 
     scorecard.finish_run(run_id)
     cost_summary = scorecard.cost_summary(run_id)
+    openrouter_models_used = sorted(
+        {a.model for ur in unit_results for a in ur.attempts if a.model in OPENROUTER_MODELS}
+    )
     scorecard.close()
     passed = sum(1 for u in unit_results if u.status == UnitStatus.PASSED)
-    emit(f"run {run_id} complete: {passed}/{len(unit_results)} passed, ${cost_summary.total_cost:.4f} total")
+    openrouter_note = f", OpenRouter: {', '.join(openrouter_models_used)}" if openrouter_models_used else ", OpenRouter: not used"
+    emit(f"run {run_id} complete: {passed}/{len(unit_results)} passed, ${cost_summary.total_cost:.4f} total{openrouter_note}")
     return RunReport(
         run_id=run_id,
         units=list(unit_results),
         cost_summary=cost_summary,
         openrouter_available=effective_allow_openrouter,
+        openrouter_models_used=openrouter_models_used,
     )

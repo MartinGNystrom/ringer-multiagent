@@ -12,6 +12,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from .models import OPENROUTER_MODELS
 from .spec import Attempt, UnitStatus
 
 _SCHEMA = """
@@ -49,6 +50,16 @@ class CostSummary:
     total_input_tokens: int
     total_output_tokens: int
     by_stage: dict[str, float]
+
+
+@dataclass
+class ModelUsage:
+    stage: str
+    model: str
+    calls: int
+    cost: float
+    input_tokens: int
+    output_tokens: int
 
 
 class Scorecard:
@@ -170,9 +181,40 @@ class Scorecard:
         )
         return dict(cur.fetchall())
 
+    def model_summary(self, run_id: str) -> list[ModelUsage]:
+        """Which model actually served each stage, and how much it cost.
+
+        Excludes 'checker' rows (model is always NULL there -- it's
+        deterministic, no model call) and any worker-error placeholder rows
+        (model is '' when a worker call raised before a model could serve
+        it at all -- see orchestrator._run_unit's exception handler).
+        """
+        cur = self._conn.execute(
+            "SELECT stage, model, COUNT(*), SUM(cost), SUM(input_tokens), SUM(output_tokens) "
+            "FROM attempts WHERE run_id = ? AND model IS NOT NULL AND model != '' "
+            "GROUP BY stage, model ORDER BY stage, model",
+            (run_id,),
+        )
+        return [
+            ModelUsage(stage, model, count, cost or 0.0, in_tok or 0, out_tok or 0)
+            for stage, model, count, cost, in_tok, out_tok in cur.fetchall()
+        ]
+
+    def openrouter_models_used(self, run_id: str) -> list[str]:
+        """Which OpenRouter models actually served a worker call this run --
+        distinct from OrchestratorConfig.allow_openrouter or run_report
+        .openrouter_available, both of which describe whether OpenRouter was
+        *reachable*, not whether anything actually ended up routed there.
+        """
+        return sorted(
+            {u.model for u in self.model_summary(run_id) if u.stage == "worker" and u.model in OPENROUTER_MODELS}
+        )
+
     def print_report(self, run_id: str) -> None:
         counts = self.status_counts(run_id)
         summary = self.cost_summary(run_id)
+        models = self.model_summary(run_id)
+        openrouter_used = self.openrouter_models_used(run_id)
         total_units = sum(counts.values()) or 1
         passed = counts.get(UnitStatus.PASSED.value, 0)
 
@@ -185,6 +227,12 @@ class Scorecard:
         for stage, cost in sorted(summary.by_stage.items()):
             print(f"  {stage:<10} ${cost:.4f}")
         print(f"tokens:     {summary.total_input_tokens:,} in / {summary.total_output_tokens:,} out")
+        if models:
+            print("\nmodels:")
+            for m in models:
+                unit = "call" if m.calls == 1 else "calls"
+                print(f"  {m.stage:<10} {m.model:<28} {m.calls} {unit:<5} ${m.cost:.4f}")
+        print(f"\nopenrouter: {'yes -- ' + ', '.join(openrouter_used) if openrouter_used else 'not used'}")
         print()
 
     def close(self) -> None:
